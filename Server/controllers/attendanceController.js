@@ -274,19 +274,26 @@ exports.getAttendanceSummary = (req, res) => {
     });
 };
 const ExcelJS = require("exceljs");
+const path = require("path");
 
 // =====================
-// ADMIN - EXPORT ATTENDANCE TO EXCEL
+// ADMIN - EXPORT ATTENDANCE TO EXCEL (FILTER + SUMMARY + LOGO + FILENAME)
 // =====================
 exports.exportAttendanceToExcel = async (req, res) => {
   try {
+    // ✅ Admin check
     if (req.user.role !== "admin") {
-      return res.status(403).json({
-        message: "Access denied. Admins only."
-      });
+      return res.status(403).json({ message: "Access denied. Admins only." });
     }
 
-    const sql = `
+    /**
+     * ✅ Date filter
+     * Usage:
+     *  - /export?date=2026-02-24
+     */
+    const { date } = req.query;
+
+    let sql = `
       SELECT 
         users.name,
         users.position,
@@ -295,40 +302,116 @@ exports.exportAttendanceToExcel = async (req, res) => {
         attendance.status
       FROM attendance
       JOIN users ON attendance.user_id = users.id
-      ORDER BY attendance.clock_in DESC
+      WHERE 1=1
     `;
 
-    db.query(sql, async (err, results) => {
+    const params = [];
+
+    // If date is provided, filter results by that date
+    if (date) {
+      sql += " AND DATE(attendance.clock_in) = ?";
+      params.push(date);
+    }
+
+    sql += " ORDER BY attendance.clock_in DESC";
+
+    db.query(sql, params, async (err, results) => {
       if (err) return res.status(500).json({ error: err.message });
 
       const workbook = new ExcelJS.Workbook();
       const worksheet = workbook.addWorksheet("Attendance");
 
+      // ✅ 4) Add Logo
+      // Put your logo here: Server/assets/logo.png
+      const logoPath = path.join(__dirname, "../assets/logo.png");
+
+      // If logo exists, insert it (Render will have it too because it is in GitHub)
+      try {
+        const logoId = workbook.addImage({
+          filename: logoPath,
+          extension: "png",
+        });
+
+        // Place logo at top-left
+        worksheet.addImage(logoId, {
+          tl: { col: 0, row: 0 }, // top-left
+          ext: { width: 150, height: 80 },
+        });
+      } catch (e) {
+        // If logo missing, just skip without breaking export
+      }
+
+      // Leave some space under logo
+      worksheet.addRow([]);
+      worksheet.addRow([]);
+      worksheet.addRow([]);
+
+      // Title row
+      const titleText = date ? `Attendance Report (${date})` : "Attendance Report (All Records)";
+      const titleRow = worksheet.addRow([titleText]);
+      titleRow.font = { bold: true, size: 14 };
+      worksheet.mergeCells(`A4:E4`);
+
+      worksheet.addRow([]);
+
+      // ✅ Table headers
       worksheet.columns = [
-        { header: "Name", key: "name", width: 20 },
+        { header: "Name", key: "name", width: 22 },
         { header: "Position", key: "position", width: 20 },
         { header: "Clock In", key: "clock_in", width: 25 },
         { header: "Clock Out", key: "clock_out", width: 25 },
-        { header: "Status", key: "status", width: 15 }
+        { header: "Status", key: "status", width: 14 },
       ];
 
-      results.forEach(row => {
-        worksheet.addRow(row);
+      // Make header row bold
+      const headerRow = worksheet.getRow(6);
+      headerRow.font = { bold: true };
+
+      // Add data rows
+      results.forEach((row) => {
+        worksheet.addRow({
+          name: row.name,
+          position: row.position,
+          clock_in: row.clock_in,
+          clock_out: row.clock_out,
+          status: row.status,
+        });
       });
+
+      // ✅ 3) Summary Totals at Bottom
+      const totalRecords = results.length;
+      const totalLate = results.filter((r) => r.status === "Late").length;
+      const totalOnTime = results.filter((r) => r.status === "On Time").length;
+
+      worksheet.addRow([]);
+      const summaryTitle = worksheet.addRow(["SUMMARY"]);
+      summaryTitle.font = { bold: true };
+      worksheet.mergeCells(`A${summaryTitle.number}:E${summaryTitle.number}`);
+
+      const r1 = worksheet.addRow(["Total Records", totalRecords]);
+      const r2 = worksheet.addRow(["Total On Time", totalOnTime]);
+      const r3 = worksheet.addRow(["Total Late", totalLate]);
+
+      // Make summary labels bold
+      [r1, r2, r3].forEach((r) => {
+        r.getCell(1).font = { bold: true };
+      });
+
+      // ✅ 6) Auto Filename
+      // If date filter exists, use it in filename; otherwise use today's date
+      const today = new Date().toISOString().slice(0, 10);
+      const fileDate = date || today;
+      const filename = `attendance_${fileDate}.xlsx`;
 
       res.setHeader(
         "Content-Type",
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
       );
-      res.setHeader(
-        "Content-Disposition",
-        "attachment; filename=attendance.xlsx"
-      );
+      res.setHeader("Content-Disposition", `attachment; filename=${filename}`);
 
       await workbook.xlsx.write(res);
       res.end();
     });
-
   } catch (error) {
     res.status(500).json({ error: "Failed to export attendance" });
   }
