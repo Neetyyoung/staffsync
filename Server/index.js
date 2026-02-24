@@ -6,7 +6,7 @@ const authRoutes = require("./routes/authRoutes");
 const attendanceRoutes = require("./routes/attendanceRoutes");
 
 const app = express();
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
 
 // 🔥 THIS MUST COME BEFORE ROUTES
 app.use(express.json());
@@ -18,10 +18,10 @@ app.use("/api/attendance", attendanceRoutes);
 app.get("/", (req, res) => {
     res.send("Attendance System Running");
 });
-
-app.listen(PORT, () => {
-    console.log(`Server running on http://localhost:${PORT}`);
-    app.get("/api/ping", (req, res) => {
+app.get("/api/ping", (req, res) => {
   res.status(200).json({ status: "StaffSync is awake 🚀" });
 });
+app.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
+    
 });
