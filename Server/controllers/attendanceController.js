@@ -325,22 +325,19 @@ exports.exportAttendanceToExcel = async (req, res) => {
       // Put your logo here: Server/assets/logo.png
       const logoPath = path.join(__dirname, "../assets/logo.png");
 
-      // If logo exists, insert it (Render will have it too because it is in GitHub)
-      try {
-        const logoId = workbook.addImage({
-          filename: logoPath,
-          extension: "png",
-        });
+const fs = require("fs");
 
-        // Place logo at top-left
-        worksheet.addImage(logoId, {
-          tl: { col: 0, row: 0 }, // top-left
-          ext: { width: 150, height: 80 },
-        });
-      } catch (e) {
-        // If logo missing, just skip without breaking export
-      }
+if (fs.existsSync(logoPath)) {
+  const logoId = workbook.addImage({
+    filename: logoPath,
+    extension: "png",
+  });
 
+  worksheet.addImage(logoId, {
+    tl: { col: 0, row: 0 },
+    ext: { width: 120, height: 60 },
+  });
+}
       // Leave some space under logo
       worksheet.addRow([]);
       worksheet.addRow([]);
