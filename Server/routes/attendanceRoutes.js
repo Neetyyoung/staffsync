@@ -13,5 +13,10 @@ router.get("/admin/attendance/all", authenticateToken, attendanceController.getA
 router.get("/admin/attendance/today", authenticateToken, attendanceController.getTodayAttendance);
 router.get("/admin/attendance/late", authenticateToken, attendanceController.getLateEmployees);
 router.get("/admin/attendance/summary", authenticateToken, attendanceController.getAttendanceSummary);
+router.get(
+  "/admin/attendance/export",
+  authenticateToken,
+  attendanceController.exportAttendanceToExcel
+);
 
 module.exports = router;
