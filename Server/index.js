@@ -21,4 +21,7 @@ app.get("/", (req, res) => {
 
 app.listen(PORT, () => {
     console.log(`Server running on http://localhost:${PORT}`);
+    app.get("/api/ping", (req, res) => {
+  res.status(200).json({ status: "StaffSync is awake 🚀" });
+});
 });
