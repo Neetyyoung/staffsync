@@ -18,5 +18,4 @@ router.get(
   authenticateToken,
   attendanceController.exportAttendanceToExcel
 );
-
 module.exports = router;
