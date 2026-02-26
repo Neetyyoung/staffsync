@@ -413,3 +413,29 @@ if (fs.existsSync(logoPath)) {
     res.status(500).json({ error: "Failed to export attendance" });
   }
 };
+// =====================================
+// GET TODAY'S ATTENDANCE STATUS
+// =====================================
+exports.getTodayStatus = (req, res) => {
+  const user_id = req.user.id;
+
+  const sql = `
+    SELECT clock_in, clock_out 
+    FROM attendance 
+    WHERE user_id = ? 
+    AND DATE(clock_in) = CURDATE()
+  `;
+
+  db.query(sql, [user_id], (err, results) => {
+    if (err) return res.status(500).json({ message: err.message });
+
+    if (results.length === 0) {
+      return res.json({
+        clock_in: null,
+        clock_out: null
+      });
+    }
+
+    res.json(results[0]);
+  });
+};

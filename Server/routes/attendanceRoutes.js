@@ -7,6 +7,7 @@ const authenticateToken = require("../middleware/authMiddleware");
 // Employee routes
 router.post("/clock-in", authenticateToken, attendanceController.clockIn);
 router.post("/clock-out", authenticateToken, attendanceController.clockOut);
+router.get("/today-status", authenticateToken, attendanceController.getTodayStatus);
 
 // 🔐 Admin routes
 router.get("/admin/attendance/all", authenticateToken, attendanceController.getAllAttendance);
