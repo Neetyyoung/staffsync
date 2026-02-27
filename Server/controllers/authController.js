@@ -6,25 +6,14 @@ const jwt = require("jsonwebtoken");
 // REGISTER (ADMIN ONLY)
 // =====================
 exports.register = async (req, res) => {
-
     if (!req.user || req.user.role !== "admin") {
-        return res.status(403).json({
-            message: "Access denied. Admin only."
-        });
+        return res.status(403).json({ message: "Access denied. Admin only." });
     }
 
     const { name, email, password, position, role } = req.body;
 
-    if (!name || !email || !password) {
-        return res.status(400).json({
-            message: "Name, email and password are required"
-        });
-    }
-
-    if (!position || position.trim() === "") {
-        return res.status(400).json({
-            message: "Job title is required"
-        });
+    if (!name || !email || !password || !position) {
+        return res.status(400).json({ message: "All fields are required." });
     }
 
     try {
@@ -37,27 +26,76 @@ exports.register = async (req, res) => {
         `;
 
         db.query(sql, [name, email, hashedPassword, userRole, position], (err) => {
-
             if (err) {
                 if (err.code === "ER_DUP_ENTRY") {
-                    return res.status(400).json({
-                        message: "Email already registered."
-                    });
+                    return res.status(400).json({ message: "Email already registered." });
                 }
-
-                return res.status(500).json({
-                    message: "Server error."
-                });
+                return res.status(500).json({ message: "Server error." });
             }
 
-            return res.json({
-                message: "User created successfully ✅"
-            });
+            return res.json({ message: "User created successfully ✅" });
         });
 
     } catch (error) {
         res.status(500).json({ error: "Registration failed" });
     }
+};
+
+// =====================
+// GET ALL USERS (ADMIN)
+// =====================
+exports.getAllUsers = (req, res) => {
+    if (req.user.role !== "admin") {
+        return res.status(403).json({ message: "Access denied." });
+    }
+
+    const sql = "SELECT id, name, email, role, position FROM users ORDER BY id DESC";
+
+    db.query(sql, (err, results) => {
+        if (err) return res.status(500).json({ error: err.message });
+        res.json(results);
+    });
+};
+
+// =====================
+// UPDATE USER (ADMIN)
+// =====================
+exports.updateUser = (req, res) => {
+    if (req.user.role !== "admin") {
+        return res.status(403).json({ message: "Access denied." });
+    }
+
+    const { id } = req.params;
+    const { name, position, role } = req.body;
+
+    const sql = `
+        UPDATE users
+        SET name = ?, position = ?, role = ?
+        WHERE id = ?
+    `;
+
+    db.query(sql, [name, position, role, id], (err) => {
+        if (err) return res.status(500).json({ error: err.message });
+        res.json({ message: "User updated successfully ✅" });
+    });
+};
+
+// =====================
+// DELETE USER (ADMIN)
+// =====================
+exports.deleteUser = (req, res) => {
+    if (req.user.role !== "admin") {
+        return res.status(403).json({ message: "Access denied." });
+    }
+
+    const { id } = req.params;
+
+    const sql = "DELETE FROM users WHERE id = ?";
+
+    db.query(sql, [id], (err) => {
+        if (err) return res.status(500).json({ error: err.message });
+        res.json({ message: "User deleted successfully ✅" });
+    });
 };
 
 // =====================
@@ -76,7 +114,6 @@ exports.login = (req, res) => {
         }
 
         const user = results[0];
-
         const isMatch = await bcrypt.compare(password, user.password);
 
         if (!isMatch) {
@@ -107,14 +144,11 @@ exports.login = (req, res) => {
 // CHANGE PASSWORD
 // =====================
 exports.changePassword = async (req, res) => {
-
     const user_id = req.user.id;
     const { currentPassword, newPassword } = req.body;
 
     if (!currentPassword || !newPassword) {
-        return res.status(400).json({
-            message: "All fields are required."
-        });
+        return res.status(400).json({ message: "All fields required." });
     }
 
     const sql = "SELECT password FROM users WHERE id = ?";
@@ -123,25 +157,17 @@ exports.changePassword = async (req, res) => {
         if (err) return res.status(500).json({ error: err.message });
 
         const user = results[0];
-
         const isMatch = await bcrypt.compare(currentPassword, user.password);
 
         if (!isMatch) {
-            return res.status(400).json({
-                message: "Current password is incorrect."
-            });
+            return res.status(400).json({ message: "Current password incorrect." });
         }
 
         const hashedPassword = await bcrypt.hash(newPassword, 10);
 
-        const updateSql = "UPDATE users SET password = ? WHERE id = ?";
-
-        db.query(updateSql, [hashedPassword, user_id], (err) => {
+        db.query("UPDATE users SET password = ? WHERE id = ?", [hashedPassword, user_id], (err) => {
             if (err) return res.status(500).json({ error: err.message });
-
-            return res.json({
-                message: "Password updated successfully ✅"
-            });
+            res.json({ message: "Password updated successfully ✅" });
         });
     });
 };
@@ -150,13 +176,5 @@ exports.changePassword = async (req, res) => {
 // GET CURRENT USER
 // =====================
 exports.getCurrentUser = (req, res) => {
-    if (!req.user) {
-        return res.status(401).json({
-            message: "Unauthorized"
-        });
-    }
-
-    return res.json({
-        user: req.user
-    });
+    res.json({ user: req.user });
 };
