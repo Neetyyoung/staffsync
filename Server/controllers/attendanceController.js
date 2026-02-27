@@ -35,9 +35,14 @@ exports.clockIn = (req, res) => {
     const { latitude, longitude } = req.body;
 
     if (!latitude || !longitude) {
-        return res.status(400).json({
-            message: "Location is required for clock-in"
-        });
+       const notifySql = `
+  INSERT INTO notifications (user_id, title, message)
+  VALUES (?, 'Clock In', 'You clocked in successfully.')
+`;
+
+db.query(notifySql, [user_id], () => {
+  return res.json({ message: "Clock-in recorded successfully" });
+});
     }
 
     const distance = calculateDistance(latitude, longitude, OFFICE_LAT, OFFICE_LNG);
@@ -87,9 +92,14 @@ exports.clockOut = (req, res) => {
     const { latitude, longitude } = req.body;
 
     if (!latitude || !longitude) {
-        return res.status(400).json({
-            message: "Location is required for clock-out"
-        });
+       const notifySql = `
+  INSERT INTO notifications (user_id, title, message)
+  VALUES (?, 'Clock Out', 'You clocked out successfully.')
+`;
+
+db.query(notifySql, [user_id], () => {
+  return res.json({ message: "Clock-out recorded successfully" });
+});
     }
 
     const distance = calculateDistance(latitude, longitude, OFFICE_LAT, OFFICE_LNG);
