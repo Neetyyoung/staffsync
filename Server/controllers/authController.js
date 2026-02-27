@@ -7,7 +7,6 @@ const jwt = require("jsonwebtoken");
 // =====================
 exports.register = async (req, res) => {
 
-    // 🔐 Only Admin Can Create Accounts
     if (!req.user || req.user.role !== "admin") {
         return res.status(403).json({
             message: "Access denied. Admin only."
@@ -30,8 +29,6 @@ exports.register = async (req, res) => {
 
     try {
         const hashedPassword = await bcrypt.hash(password, 10);
-
-        // Default role is employee if not provided
         const userRole = role === "admin" ? "admin" : "employee";
 
         const sql = `
@@ -39,29 +36,24 @@ exports.register = async (req, res) => {
             VALUES (?, ?, ?, ?, ?)
         `;
 
-        db.query(
-            sql,
-            [name, email, hashedPassword, userRole, position],
-            (err, result) => {
+        db.query(sql, [name, email, hashedPassword, userRole, position], (err) => {
 
-                if (err) {
-                    if (err.code === "ER_DUP_ENTRY") {
-                        return res.status(400).json({
-                            message: "Email already registered. Please use another email."
-                        });
-                    }
-
-                    return res.status(500).json({
-                        message: "Server error. Please try again."
+            if (err) {
+                if (err.code === "ER_DUP_ENTRY") {
+                    return res.status(400).json({
+                        message: "Email already registered."
                     });
                 }
 
-                return res.json({
-                    message: "User created successfully ✅",
-                    role: userRole
+                return res.status(500).json({
+                    message: "Server error."
                 });
             }
-        );
+
+            return res.json({
+                message: "User created successfully ✅"
+            });
+        });
 
     } catch (error) {
         res.status(500).json({ error: "Registration failed" });
@@ -77,9 +69,7 @@ exports.login = (req, res) => {
     const sql = "SELECT * FROM users WHERE email = ?";
 
     db.query(sql, [email], async (err, results) => {
-        if (err) {
-            return res.status(500).json({ error: err.message });
-        }
+        if (err) return res.status(500).json({ error: err.message });
 
         if (results.length === 0) {
             return res.status(400).json({ message: "User not found" });
@@ -114,10 +104,52 @@ exports.login = (req, res) => {
 };
 
 // =====================
+// CHANGE PASSWORD
+// =====================
+exports.changePassword = async (req, res) => {
+
+    const user_id = req.user.id;
+    const { currentPassword, newPassword } = req.body;
+
+    if (!currentPassword || !newPassword) {
+        return res.status(400).json({
+            message: "All fields are required."
+        });
+    }
+
+    const sql = "SELECT password FROM users WHERE id = ?";
+
+    db.query(sql, [user_id], async (err, results) => {
+        if (err) return res.status(500).json({ error: err.message });
+
+        const user = results[0];
+
+        const isMatch = await bcrypt.compare(currentPassword, user.password);
+
+        if (!isMatch) {
+            return res.status(400).json({
+                message: "Current password is incorrect."
+            });
+        }
+
+        const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+        const updateSql = "UPDATE users SET password = ? WHERE id = ?";
+
+        db.query(updateSql, [hashedPassword, user_id], (err) => {
+            if (err) return res.status(500).json({ error: err.message });
+
+            return res.json({
+                message: "Password updated successfully ✅"
+            });
+        });
+    });
+};
+
+// =====================
 // GET CURRENT USER
 // =====================
 exports.getCurrentUser = (req, res) => {
-
     if (!req.user) {
         return res.status(401).json({
             message: "Unauthorized"
