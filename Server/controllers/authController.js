@@ -3,11 +3,18 @@ const db = require("../config/db");
 const jwt = require("jsonwebtoken");
 
 // =====================
-// REGISTER
+// REGISTER (ADMIN ONLY)
 // =====================
 exports.register = async (req, res) => {
-    console.log("Register route hit");
-    const { name, email, password, position } = req.body;
+
+    // 🔐 Only Admin Can Create Accounts
+    if (!req.user || req.user.role !== "admin") {
+        return res.status(403).json({
+            message: "Access denied. Admin only."
+        });
+    }
+
+    const { name, email, password, position, role } = req.body;
 
     if (!name || !email || !password) {
         return res.status(400).json({
@@ -24,29 +31,37 @@ exports.register = async (req, res) => {
     try {
         const hashedPassword = await bcrypt.hash(password, 10);
 
+        // Default role is employee if not provided
+        const userRole = role === "admin" ? "admin" : "employee";
+
         const sql = `
             INSERT INTO users (name, email, password, role, position)
-            VALUES (?, ?, ?, 'employee', ?)
+            VALUES (?, ?, ?, ?, ?)
         `;
 
-        db.query(sql, [name, email, hashedPassword, position], (err, result) => {
-    if (err) {
+        db.query(
+            sql,
+            [name, email, hashedPassword, userRole, position],
+            (err, result) => {
 
-        if (err.code === "ER_DUP_ENTRY") {
-            return res.status(400).json({
-                message: "Email already registered. Please use another email."
-            });
-        }
+                if (err) {
+                    if (err.code === "ER_DUP_ENTRY") {
+                        return res.status(400).json({
+                            message: "Email already registered. Please use another email."
+                        });
+                    }
 
-        return res.status(500).json({
-            message: "Server error. Please try again."
-        });
-    }
+                    return res.status(500).json({
+                        message: "Server error. Please try again."
+                    });
+                }
 
-    return res.json({
-        message: "User registered successfully"
-    });
-});
+                return res.json({
+                    message: "User created successfully ✅",
+                    role: userRole
+                });
+            }
+        );
 
     } catch (error) {
         res.status(500).json({ error: "Registration failed" });
@@ -85,29 +100,31 @@ exports.login = (req, res) => {
         );
 
         res.json({
-    message: "Login successful ✅",
-    user: {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        position: user.position
-    },
-    token
-});
+            message: "Login successful ✅",
+            user: {
+                id: user.id,
+                name: user.name,
+                email: user.email,
+                role: user.role,
+                position: user.position
+            },
+            token
+        });
     });
 };
+
 // =====================
 // GET CURRENT USER
 // =====================
 exports.getCurrentUser = (req, res) => {
+
+    if (!req.user) {
+        return res.status(401).json({
+            message: "Unauthorized"
+        });
+    }
+
     return res.json({
-        user: {
-            id: req.user.id,
-            name: req.user.name,
-            email: req.user.email,
-            role: req.user.role,
-            position: req.user.position
-        }
+        user: req.user
     });
 };
