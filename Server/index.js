@@ -18,4 +18,4 @@ app.use("/api/notifications", notificationRoutes);
 app.get("/", (req, res) => res.send("Attendance System Running"));
 app.get("/api/ping", (req, res) => res.status(200).json({ status: "StaffSync is awake 🚀" }));
 
-app.listen(PORT, "0.0.0.0", () => console.log(`Server running on port ${PORT}`));
+app.listen(PORT,() => console.log(`Server running on port ${PORT}`));

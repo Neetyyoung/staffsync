@@ -1,202 +1,22 @@
-const bcrypt = require("bcrypt");
-const db = require("../config/db");
-const jwt = require("jsonwebtoken");
+const express = require("express");
+const router = express.Router();
 
-// helper: create notification
-const createNotification = (user_id, title, message) => {
-  const sql = `INSERT INTO notifications (user_id, title, message) VALUES (?, ?, ?)`;
-  db.query(sql, [user_id, title, message], () => {});
-};
+const authenticateToken = require("../middleware/authMiddleware");
+const authController = require("../controllers/authController");
 
-// =====================
-// REGISTER (ADMIN ONLY)
-// =====================
-exports.register = async (req, res) => {
-  if (!req.user || req.user.role !== "admin") {
-    return res.status(403).json({ message: "Access denied. Admin only." });
-  }
+// Public routes
+router.post("/login", authController.login);
 
-  const { name, email, password, position, role } = req.body;
+// Protected routes
+router.post("/register", authenticateToken, authController.register);
+router.post("/change-password", authenticateToken, authController.changePassword);
 
-  if (!name || !email || !password || !position) {
-    return res.status(400).json({ message: "All fields are required." });
-  }
+router.get("/me", authenticateToken, authController.getCurrentUser);
+router.put("/me", authenticateToken, authController.updateMyProfile);
 
-  try {
-    const hashedPassword = await bcrypt.hash(password, 10);
-    const userRole = role === "admin" ? "admin" : "employee";
+// Admin routes
+router.get("/users", authenticateToken, authController.getAllUsers);
+router.put("/users/:id", authenticateToken, authController.updateUser);
+router.delete("/users/:id", authenticateToken, authController.deleteUser);
 
-    const sql = `
-      INSERT INTO users (name, email, password, role, position)
-      VALUES (?, ?, ?, ?, ?)
-    `;
-
-    db.query(sql, [name, email, hashedPassword, userRole, position], (err, result) => {
-      if (err) {
-        if (err.code === "ER_DUP_ENTRY") {
-          return res.status(400).json({ message: "Email already registered." });
-        }
-        return res.status(500).json({ message: "Server error." });
-      }
-
-      // Notify newly created user
-      createNotification(
-        result.insertId,
-        "Account Created",
-        "Your StaffSync account has been created. Please change your password after login."
-      );
-
-      return res.json({ message: "User created successfully ✅" });
-    });
-  } catch (error) {
-    res.status(500).json({ error: "Registration failed" });
-  }
-};
-
-// =====================
-// GET ALL USERS (ADMIN)
-// =====================
-exports.getAllUsers = (req, res) => {
-  if (req.user.role !== "admin") return res.status(403).json({ message: "Access denied." });
-
-  const sql = "SELECT id, name, email, role, position FROM users ORDER BY id DESC";
-  db.query(sql, (err, results) => {
-    if (err) return res.status(500).json({ error: err.message });
-    res.json(results);
-  });
-};
-
-// =====================
-// UPDATE USER (ADMIN) - includes email
-// =====================
-exports.updateUser = (req, res) => {
-  if (req.user.role !== "admin") return res.status(403).json({ message: "Access denied." });
-
-  const { id } = req.params;
-  const { name, position, role, email } = req.body;
-
-  const sql = `
-    UPDATE users
-    SET name = ?, position = ?, role = ?, email = ?
-    WHERE id = ?
-  `;
-
-  db.query(sql, [name, position, role, email, id], (err) => {
-    if (err) {
-      if (err.code === "ER_DUP_ENTRY") return res.status(400).json({ message: "Email already in use." });
-      return res.status(500).json({ error: err.message });
-    }
-
-    // Notify user being updated
-    createNotification(id, "Profile Updated", "Your account details were updated by an admin.");
-    res.json({ message: "User updated successfully ✅" });
-  });
-};
-
-// =====================
-// DELETE USER (ADMIN)
-// =====================
-exports.deleteUser = (req, res) => {
-  if (req.user.role !== "admin") return res.status(403).json({ message: "Access denied." });
-
-  const { id } = req.params;
-  const sql = "DELETE FROM users WHERE id = ?";
-
-  db.query(sql, [id], (err) => {
-    if (err) return res.status(500).json({ error: err.message });
-    res.json({ message: "User deleted successfully ✅" });
-  });
-};
-
-// =====================
-// LOGIN
-// =====================
-exports.login = (req, res) => {
-  const { email, password } = req.body;
-
-  const sql = "SELECT * FROM users WHERE email = ?";
-  db.query(sql, [email], async (err, results) => {
-    if (err) return res.status(500).json({ error: err.message });
-    if (results.length === 0) return res.status(400).json({ message: "User not found" });
-
-    const user = results[0];
-    const isMatch = await bcrypt.compare(password, user.password);
-    if (!isMatch) return res.status(400).json({ message: "Invalid password" });
-
-    const token = jwt.sign({ id: user.id, role: user.role }, process.env.JWT_SECRET, { expiresIn: "7d" });
-
-    // Notify login
-    createNotification(user.id, "Login", "You signed in successfully.");
-
-    res.json({
-      message: "Login successful ✅",
-      user: { id: user.id, name: user.name, email: user.email, role: user.role, position: user.position },
-      token,
-    });
-  });
-};
-
-// =====================
-// CHANGE PASSWORD
-// =====================
-exports.changePassword = async (req, res) => {
-  const user_id = req.user.id;
-  const { currentPassword, newPassword } = req.body;
-
-  if (!currentPassword || !newPassword) {
-    return res.status(400).json({ message: "All fields required." });
-  }
-
-  const sql = "SELECT password FROM users WHERE id = ?";
-  db.query(sql, [user_id], async (err, results) => {
-    if (err) return res.status(500).json({ error: err.message });
-
-    const user = results[0];
-    const isMatch = await bcrypt.compare(currentPassword, user.password);
-    if (!isMatch) return res.status(400).json({ message: "Current password incorrect." });
-
-    const hashedPassword = await bcrypt.hash(newPassword, 10);
-
-    db.query("UPDATE users SET password = ? WHERE id = ?", [hashedPassword, user_id], (err) => {
-      if (err) return res.status(500).json({ error: err.message });
-
-      createNotification(user_id, "Password Changed", "Your password was updated successfully.");
-      res.json({ message: "Password updated successfully ✅" });
-    });
-  });
-};
-
-// =====================
-// UPDATE MY PROFILE (SELF)
-// =====================
-exports.updateMyProfile = (req, res) => {
-  const user_id = req.user.id;
-  const { name, email, position } = req.body;
-
-  if (!name || !email || !position) {
-    return res.status(400).json({ message: "Name, email, and position are required." });
-  }
-
-  const sql = `
-    UPDATE users
-    SET name = ?, email = ?, position = ?
-    WHERE id = ?
-  `;
-
-  db.query(sql, [name, email, position, user_id], (err) => {
-    if (err) {
-      if (err.code === "ER_DUP_ENTRY") return res.status(400).json({ message: "Email already in use." });
-      return res.status(500).json({ message: err.message });
-    }
-
-    createNotification(user_id, "Profile Updated", "You updated your profile information.");
-    res.json({ message: "Profile updated successfully ✅" });
-  });
-};
-
-// =====================
-// GET CURRENT USER
-// =====================
-exports.getCurrentUser = (req, res) => {
-  res.json({ user: req.user });
-};
+module.exports = router;
