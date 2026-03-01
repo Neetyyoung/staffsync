@@ -1,116 +1,34 @@
 const bcrypt = require("bcrypt");
 const db = require("../config/db");
 const jwt = require("jsonwebtoken");
+const crypto = require("crypto");
+const nodemailer = require("nodemailer");
 
-// helper: create notification
+/* =====================================
+   EMAIL TRANSPORTER
+===================================== */
+
+const transporter = nodemailer.createTransport({
+  service: "gmail",
+  auth: {
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS,
+  },
+});
+
+/* =====================================
+   HELPER: CREATE NOTIFICATION
+===================================== */
+
 const createNotification = (user_id, title, message) => {
   const sql = `INSERT INTO notifications (user_id, title, message) VALUES (?, ?, ?)`;
   db.query(sql, [user_id, title, message], () => {});
 };
 
-// =====================
-// REGISTER (ADMIN ONLY)
-// =====================
-exports.register = async (req, res) => {
-  if (!req.user || req.user.role !== "admin") {
-    return res.status(403).json({ message: "Access denied. Admin only." });
-  }
+/* =====================================
+   LOGIN
+===================================== */
 
-  const { name, email, password, position, role } = req.body;
-
-  if (!name || !email || !password || !position) {
-    return res.status(400).json({ message: "All fields are required." });
-  }
-
-  try {
-    const hashedPassword = await bcrypt.hash(password, 10);
-    const userRole = role === "admin" ? "admin" : "employee";
-
-    const sql = `
-      INSERT INTO users (name, email, password, role, position)
-      VALUES (?, ?, ?, ?, ?)
-    `;
-
-    db.query(sql, [name, email, hashedPassword, userRole, position], (err, result) => {
-      if (err) {
-        if (err.code === "ER_DUP_ENTRY") {
-          return res.status(400).json({ message: "Email already registered." });
-        }
-        return res.status(500).json({ message: "Server error." });
-      }
-
-      // Notify newly created user
-      createNotification(
-        result.insertId,
-        "Account Created",
-        "Your StaffSync account has been created. Please change your password after login."
-      );
-
-      return res.json({ message: "User created successfully ✅" });
-    });
-  } catch (error) {
-    res.status(500).json({ error: "Registration failed" });
-  }
-};
-
-// =====================
-// GET ALL USERS (ADMIN)
-// =====================
-exports.getAllUsers = (req, res) => {
-  if (req.user.role !== "admin") return res.status(403).json({ message: "Access denied." });
-
-  const sql = "SELECT id, name, email, role, position FROM users ORDER BY id DESC";
-  db.query(sql, (err, results) => {
-    if (err) return res.status(500).json({ error: err.message });
-    res.json(results);
-  });
-};
-
-// =====================
-// UPDATE USER (ADMIN) - includes email
-// =====================
-exports.updateUser = (req, res) => {
-  if (req.user.role !== "admin") return res.status(403).json({ message: "Access denied." });
-
-  const { id } = req.params;
-  const { name, position, role, email } = req.body;
-
-  const sql = `
-    UPDATE users
-    SET name = ?, position = ?, role = ?, email = ?
-    WHERE id = ?
-  `;
-
-  db.query(sql, [name, position, role, email, id], (err) => {
-    if (err) {
-      if (err.code === "ER_DUP_ENTRY") return res.status(400).json({ message: "Email already in use." });
-      return res.status(500).json({ error: err.message });
-    }
-
-    // Notify user being updated
-    createNotification(id, "Profile Updated", "Your account details were updated by an admin.");
-    res.json({ message: "User updated successfully ✅" });
-  });
-};
-
-// =====================
-// DELETE USER (ADMIN)
-// =====================
-exports.deleteUser = (req, res) => {
-  if (req.user.role !== "admin") return res.status(403).json({ message: "Access denied." });
-
-  const { id } = req.params;
-  const sql = "DELETE FROM users WHERE id = ?";
-
-  db.query(sql, [id], (err) => {
-    if (err) return res.status(500).json({ error: err.message });
-    res.json({ message: "User deleted successfully ✅" });
-  });
-};
-
-// =====================
-// LOGIN
-// =====================
 exports.login = (req, res) => {
   const { email, password } = req.body;
 
@@ -125,78 +43,100 @@ exports.login = (req, res) => {
 
     const token = jwt.sign({ id: user.id, role: user.role }, process.env.JWT_SECRET, { expiresIn: "7d" });
 
-    // Notify login
     createNotification(user.id, "Login", "You signed in successfully.");
 
     res.json({
       message: "Login successful ✅",
-      user: { id: user.id, name: user.name, email: user.email, role: user.role, position: user.position },
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        position: user.position,
+      },
       token,
     });
   });
 };
 
-// =====================
-// CHANGE PASSWORD
-// =====================
-exports.changePassword = async (req, res) => {
-  const user_id = req.user.id;
-  const { currentPassword, newPassword } = req.body;
+/* =====================================
+   FORGOT PASSWORD
+===================================== */
 
-  if (!currentPassword || !newPassword) {
-    return res.status(400).json({ message: "All fields required." });
-  }
+exports.forgotPassword = (req, res) => {
+  const { email } = req.body;
 
-  const sql = "SELECT password FROM users WHERE id = ?";
-  db.query(sql, [user_id], async (err, results) => {
+  if (!email) return res.status(400).json({ message: "Email required." });
+
+  const sql = "SELECT * FROM users WHERE email = ?";
+  db.query(sql, [email], async (err, results) => {
     if (err) return res.status(500).json({ error: err.message });
+    if (results.length === 0) return res.status(400).json({ message: "User not found." });
 
     const user = results[0];
-    const isMatch = await bcrypt.compare(currentPassword, user.password);
-    if (!isMatch) return res.status(400).json({ message: "Current password incorrect." });
 
-    const hashedPassword = await bcrypt.hash(newPassword, 10);
+    // Generate token
+    const resetToken = crypto.randomBytes(32).toString("hex");
+    const hashedToken = crypto.createHash("sha256").update(resetToken).digest("hex");
 
-    db.query("UPDATE users SET password = ? WHERE id = ?", [hashedPassword, user_id], (err) => {
-      if (err) return res.status(500).json({ error: err.message });
+    const expires = new Date(Date.now() + 15 * 60 * 1000); // 15 mins
 
-      createNotification(user_id, "Password Changed", "Your password was updated successfully.");
-      res.json({ message: "Password updated successfully ✅" });
+    db.query(
+      "UPDATE users SET reset_token = ?, reset_token_expires = ? WHERE id = ?",
+      [hashedToken, expires, user.id]
+    );
+
+    const resetURL = `${process.env.FRONTEND_URL}/reset-password/${resetToken}`;
+
+    await transporter.sendMail({
+      from: process.env.EMAIL_USER,
+      to: user.email,
+      subject: "Password Reset - StaffSync",
+      html: `
+        <h3>Password Reset</h3>
+        <p>Click the link below to reset your password:</p>
+        <a href="${resetURL}">${resetURL}</a>
+        <p>This link expires in 15 minutes.</p>
+      `,
     });
+
+    res.json({ message: "Reset link sent to your email 📧" });
   });
 };
 
-// =====================
-// UPDATE MY PROFILE (SELF)
-// =====================
-exports.updateMyProfile = (req, res) => {
-  const user_id = req.user.id;
-  const { name, email, position } = req.body;
+/* =====================================
+   RESET PASSWORD
+===================================== */
 
-  if (!name || !email || !position) {
-    return res.status(400).json({ message: "Name, email, and position are required." });
-  }
+exports.resetPassword = async (req, res) => {
+  const { token } = req.params;
+  const { newPassword } = req.body;
+
+  if (!newPassword) return res.status(400).json({ message: "New password required." });
+
+  const hashedToken = crypto.createHash("sha256").update(token).digest("hex");
 
   const sql = `
-    UPDATE users
-    SET name = ?, email = ?, position = ?
-    WHERE id = ?
+    SELECT * FROM users 
+    WHERE reset_token = ? 
+    AND reset_token_expires > NOW()
   `;
 
-  db.query(sql, [name, email, position, user_id], (err) => {
-    if (err) {
-      if (err.code === "ER_DUP_ENTRY") return res.status(400).json({ message: "Email already in use." });
-      return res.status(500).json({ message: err.message });
-    }
+  db.query(sql, [hashedToken], async (err, results) => {
+    if (err) return res.status(500).json({ error: err.message });
+    if (results.length === 0)
+      return res.status(400).json({ message: "Invalid or expired token." });
 
-    createNotification(user_id, "Profile Updated", "You updated your profile information.");
-    res.json({ message: "Profile updated successfully ✅" });
+    const user = results[0];
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+    db.query(
+      "UPDATE users SET password = ?, reset_token = NULL, reset_token_expires = NULL WHERE id = ?",
+      [hashedPassword, user.id]
+    );
+
+    createNotification(user.id, "Password Reset", "Your password was reset successfully.");
+
+    res.json({ message: "Password reset successful ✅" });
   });
-};
-
-// =====================
-// GET CURRENT USER
-// =====================
-exports.getCurrentUser = (req, res) => {
-  res.json({ user: req.user });
 };
