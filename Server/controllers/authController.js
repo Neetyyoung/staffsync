@@ -2,24 +2,13 @@ const bcrypt = require("bcrypt");
 const db = require("../config/db");
 const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
-const nodemailer = require("nodemailer");
+const { Resend } = require("resend");
 
-/* =====================================
-   EMAIL TRANSPORTER
-===================================== */
-
-const transporter = nodemailer.createTransport({
-  service: "gmail",
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS,
-  },
-});
+const resend = new Resend(process.env.RESEND_API_KEY);
 
 /* =====================================
    HELPER: CREATE NOTIFICATION
 ===================================== */
-
 const createNotification = (user_id, title, message) => {
   const sql = `INSERT INTO notifications (user_id, title, message) VALUES (?, ?, ?)`;
   db.query(sql, [user_id, title, message], () => {});
@@ -28,25 +17,36 @@ const createNotification = (user_id, title, message) => {
 /* =====================================
    LOGIN
 ===================================== */
-
 exports.login = (req, res) => {
   const { email, password } = req.body;
 
   db.query("SELECT * FROM users WHERE email = ?", [email], async (err, results) => {
     if (err) return res.status(500).json({ error: err.message });
-    if (results.length === 0) return res.status(400).json({ message: "User not found" });
+    if (results.length === 0)
+      return res.status(400).json({ message: "User not found" });
 
     const user = results[0];
     const isMatch = await bcrypt.compare(password, user.password);
-    if (!isMatch) return res.status(400).json({ message: "Invalid password" });
+    if (!isMatch)
+      return res.status(400).json({ message: "Invalid password" });
 
-    const token = jwt.sign({ id: user.id, role: user.role }, process.env.JWT_SECRET, { expiresIn: "7d" });
+    const token = jwt.sign(
+      { id: user.id, role: user.role },
+      process.env.JWT_SECRET,
+      { expiresIn: "7d" }
+    );
 
     createNotification(user.id, "Login", "You signed in successfully.");
 
     res.json({
       message: "Login successful ✅",
-      user: { id: user.id, name: user.name, email: user.email, role: user.role, position: user.position },
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        position: user.position,
+      },
       token,
     });
   });
@@ -55,60 +55,64 @@ exports.login = (req, res) => {
 /* =====================================
    REGISTER (ADMIN ONLY)
 ===================================== */
-
 exports.register = async (req, res) => {
-  if (!req.user || req.user.role !== "admin") {
+  if (!req.user || req.user.role !== "admin")
     return res.status(403).json({ message: "Access denied. Admin only." });
-  }
 
   const { name, email, password, position, role } = req.body;
 
-  if (!name || !email || !password || !position) {
+  if (!name || !email || !password || !position)
     return res.status(400).json({ message: "All fields are required." });
-  }
 
   const hashedPassword = await bcrypt.hash(password, 10);
   const userRole = role === "admin" ? "admin" : "employee";
 
   db.query(
-    `INSERT INTO users (name, email, password, role, position) VALUES (?, ?, ?, ?, ?)`,
+    `INSERT INTO users (name, email, password, role, position)
+     VALUES (?, ?, ?, ?, ?)`,
     [name, email, hashedPassword, userRole, position],
     (err, result) => {
       if (err) {
-        if (err.code === "ER_DUP_ENTRY") return res.status(400).json({ message: "Email already registered." });
+        if (err.code === "ER_DUP_ENTRY")
+          return res.status(400).json({ message: "Email already registered." });
         return res.status(500).json({ error: err.message });
       }
 
-      createNotification(result.insertId, "Account Created", "Your account has been created.");
+      createNotification(
+        result.insertId,
+        "Account Created",
+        "Your account has been created."
+      );
+
       res.json({ message: "User created successfully ✅" });
     }
   );
 };
 
 /* =====================================
-   CHANGE PASSWORD (LOGGED IN)
+   CHANGE PASSWORD
 ===================================== */
-
 exports.changePassword = async (req, res) => {
   const user_id = req.user.id;
   const { currentPassword, newPassword } = req.body;
 
-  if (!currentPassword || !newPassword) {
+  if (!currentPassword || !newPassword)
     return res.status(400).json({ message: "All fields required." });
-  }
 
   db.query("SELECT password FROM users WHERE id = ?", [user_id], async (err, results) => {
     if (err) return res.status(500).json({ error: err.message });
 
     const user = results[0];
     const isMatch = await bcrypt.compare(currentPassword, user.password);
-    if (!isMatch) return res.status(400).json({ message: "Current password incorrect." });
+    if (!isMatch)
+      return res.status(400).json({ message: "Current password incorrect." });
 
     const hashedPassword = await bcrypt.hash(newPassword, 10);
 
     db.query("UPDATE users SET password = ? WHERE id = ?", [hashedPassword, user_id]);
 
     createNotification(user_id, "Password Changed", "Your password was updated.");
+
     res.json({ message: "Password updated successfully ✅" });
   });
 };
@@ -116,19 +120,14 @@ exports.changePassword = async (req, res) => {
 /* =====================================
    FORGOT PASSWORD
 ===================================== */
-
 exports.forgotPassword = async (req, res) => {
   try {
     const { email } = req.body;
-
     if (!email)
       return res.status(400).json({ message: "Email required." });
 
-    const sql = "SELECT * FROM users WHERE email = ?";
-
-    db.query(sql, [email], async (err, results) => {
+    db.query("SELECT * FROM users WHERE email = ?", [email], async (err, results) => {
       if (err) return res.status(500).json({ error: err.message });
-
       if (results.length === 0)
         return res.status(400).json({ message: "User not found." });
 
@@ -152,8 +151,8 @@ exports.forgotPassword = async (req, res) => {
           try {
             const resetURL = `${process.env.FRONTEND_URL}/reset-password/${resetToken}`;
 
-            await transporter.sendMail({
-              from: process.env.EMAIL_USER,
+            await resend.emails.send({
+              from: "StaffSync <onboarding@resend.dev>",
               to: user.email,
               subject: "Password Reset - StaffSync",
               html: `
@@ -181,10 +180,10 @@ exports.forgotPassword = async (req, res) => {
     res.status(500).json({ message: "Server error." });
   }
 };
+
 /* =====================================
    RESET PASSWORD
 ===================================== */
-
 exports.resetPassword = async (req, res) => {
   const { token } = req.params;
   const { newPassword } = req.body;
@@ -196,7 +195,8 @@ exports.resetPassword = async (req, res) => {
     [hashedToken],
     async (err, results) => {
       if (err) return res.status(500).json({ error: err.message });
-      if (results.length === 0) return res.status(400).json({ message: "Invalid or expired token." });
+      if (results.length === 0)
+        return res.status(400).json({ message: "Invalid or expired token." });
 
       const user = results[0];
       const hashedPassword = await bcrypt.hash(newPassword, 10);
@@ -207,6 +207,7 @@ exports.resetPassword = async (req, res) => {
       );
 
       createNotification(user.id, "Password Reset", "Your password was reset.");
+
       res.json({ message: "Password reset successful ✅" });
     }
   );
@@ -215,7 +216,6 @@ exports.resetPassword = async (req, res) => {
 /* =====================================
    GET CURRENT USER
 ===================================== */
-
 exports.getCurrentUser = (req, res) => {
   res.json({ user: req.user });
 };
@@ -223,7 +223,6 @@ exports.getCurrentUser = (req, res) => {
 /* =====================================
    UPDATE MY PROFILE
 ===================================== */
-
 exports.updateMyProfile = (req, res) => {
   const user_id = req.user.id;
   const { name, email, position } = req.body;
@@ -243,18 +242,22 @@ exports.updateMyProfile = (req, res) => {
 /* =====================================
    ADMIN USER MANAGEMENT
 ===================================== */
-
 exports.getAllUsers = (req, res) => {
-  if (req.user.role !== "admin") return res.status(403).json({ message: "Access denied." });
+  if (req.user.role !== "admin")
+    return res.status(403).json({ message: "Access denied." });
 
-  db.query("SELECT id, name, email, role, position FROM users", (err, results) => {
-    if (err) return res.status(500).json({ error: err.message });
-    res.json(results);
-  });
+  db.query(
+    "SELECT id, name, email, role, position FROM users",
+    (err, results) => {
+      if (err) return res.status(500).json({ error: err.message });
+      res.json(results);
+    }
+  );
 };
 
 exports.updateUser = (req, res) => {
-  if (req.user.role !== "admin") return res.status(403).json({ message: "Access denied." });
+  if (req.user.role !== "admin")
+    return res.status(403).json({ message: "Access denied." });
 
   const { id } = req.params;
   const { name, email, role, position } = req.body;
@@ -272,9 +275,11 @@ exports.updateUser = (req, res) => {
 };
 
 exports.deleteUser = (req, res) => {
-  if (req.user.role !== "admin") return res.status(403).json({ message: "Access denied." });
+  if (req.user.role !== "admin")
+    return res.status(403).json({ message: "Access denied." });
 
   const { id } = req.params;
+
   db.query("DELETE FROM users WHERE id = ?", [id], (err) => {
     if (err) return res.status(500).json({ error: err.message });
     res.json({ message: "User deleted successfully ✅" });
