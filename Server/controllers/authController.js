@@ -1,14 +1,11 @@
 const bcrypt = require("bcrypt");
 const db = require("../config/db");
 const jwt = require("jsonwebtoken");
-const crypto = require("crypto");
-const { Resend } = require("resend");
-
-const resend = new Resend(process.env.RESEND_API_KEY);
 
 /* =====================================
    HELPER: CREATE NOTIFICATION
 ===================================== */
+
 const createNotification = (user_id, title, message) => {
   const sql = `INSERT INTO notifications (user_id, title, message) VALUES (?, ?, ?)`;
   db.query(sql, [user_id, title, message], () => {});
@@ -17,6 +14,7 @@ const createNotification = (user_id, title, message) => {
 /* =====================================
    LOGIN
 ===================================== */
+
 exports.login = (req, res) => {
   const { email, password } = req.body;
 
@@ -27,6 +25,7 @@ exports.login = (req, res) => {
 
     const user = results[0];
     const isMatch = await bcrypt.compare(password, user.password);
+
     if (!isMatch)
       return res.status(400).json({ message: "Invalid password" });
 
@@ -55,26 +54,29 @@ exports.login = (req, res) => {
 /* =====================================
    REGISTER (ADMIN ONLY)
 ===================================== */
+
 exports.register = async (req, res) => {
-  if (!req.user || req.user.role !== "admin")
+  if (!req.user || req.user.role !== "admin") {
     return res.status(403).json({ message: "Access denied. Admin only." });
+  }
 
   const { name, email, password, position, role } = req.body;
 
-  if (!name || !email || !password || !position)
+  if (!name || !email || !password || !position) {
     return res.status(400).json({ message: "All fields are required." });
+  }
 
   const hashedPassword = await bcrypt.hash(password, 10);
   const userRole = role === "admin" ? "admin" : "employee";
 
   db.query(
-    `INSERT INTO users (name, email, password, role, position)
-     VALUES (?, ?, ?, ?, ?)`,
+    `INSERT INTO users (name, email, password, role, position) VALUES (?, ?, ?, ?, ?)`,
     [name, email, hashedPassword, userRole, position],
     (err, result) => {
       if (err) {
         if (err.code === "ER_DUP_ENTRY")
           return res.status(400).json({ message: "Email already registered." });
+
         return res.status(500).json({ error: err.message });
       }
 
@@ -90,132 +92,47 @@ exports.register = async (req, res) => {
 };
 
 /* =====================================
-   CHANGE PASSWORD
+   CHANGE PASSWORD (LOGGED IN USER)
 ===================================== */
+
 exports.changePassword = async (req, res) => {
   const user_id = req.user.id;
   const { currentPassword, newPassword } = req.body;
 
-  if (!currentPassword || !newPassword)
+  if (!currentPassword || !newPassword) {
     return res.status(400).json({ message: "All fields required." });
+  }
 
   db.query("SELECT password FROM users WHERE id = ?", [user_id], async (err, results) => {
     if (err) return res.status(500).json({ error: err.message });
 
     const user = results[0];
     const isMatch = await bcrypt.compare(currentPassword, user.password);
+
     if (!isMatch)
       return res.status(400).json({ message: "Current password incorrect." });
 
     const hashedPassword = await bcrypt.hash(newPassword, 10);
 
-    db.query("UPDATE users SET password = ? WHERE id = ?", [hashedPassword, user_id]);
+    db.query("UPDATE users SET password = ? WHERE id = ?", [
+      hashedPassword,
+      user_id,
+    ]);
 
-    createNotification(user_id, "Password Changed", "Your password was updated.");
+    createNotification(
+      user_id,
+      "Password Changed",
+      "Your password was updated."
+    );
 
     res.json({ message: "Password updated successfully ✅" });
   });
 };
 
 /* =====================================
-   FORGOT PASSWORD
-===================================== */
-exports.forgotPassword = async (req, res) => {
-  try {
-    const { email } = req.body;
-    if (!email)
-      return res.status(400).json({ message: "Email required." });
-
-    db.query("SELECT * FROM users WHERE email = ?", [email], async (err, results) => {
-      if (err) return res.status(500).json({ error: err.message });
-      if (results.length === 0)
-        return res.status(400).json({ message: "User not found." });
-
-      const user = results[0];
-
-      const resetToken = crypto.randomBytes(32).toString("hex");
-      const hashedToken = crypto
-        .createHash("sha256")
-        .update(resetToken)
-        .digest("hex");
-
-      const expires = new Date(Date.now() + 15 * 60 * 1000);
-
-      db.query(
-        "UPDATE users SET reset_token = ?, reset_token_expires = ? WHERE id = ?",
-        [hashedToken, expires, user.id],
-        async (updateErr) => {
-          if (updateErr)
-            return res.status(500).json({ error: updateErr.message });
-
-          try {
-            const resetURL = `${process.env.FRONTEND_URL}/reset-password/${resetToken}`;
-
-            await resend.emails.send({
-              from: "StaffSync <onboarding@resend.dev>",
-              to: user.email,
-              subject: "Password Reset - StaffSync",
-              html: `
-                <h3>Password Reset</h3>
-                <p>Click below:</p>
-                <a href="${resetURL}">${resetURL}</a>
-                <p>Expires in 15 minutes.</p>
-              `,
-            });
-
-            res.json({ message: "Reset link sent 📧" });
-
-          } catch (mailError) {
-            console.error("MAIL ERROR:", mailError);
-            return res.status(500).json({
-              message: "Email service failed.",
-            });
-          }
-        }
-      );
-    });
-
-  } catch (error) {
-    console.error("Forgot Password Crash:", error);
-    res.status(500).json({ message: "Server error." });
-  }
-};
-
-/* =====================================
-   RESET PASSWORD
-===================================== */
-exports.resetPassword = async (req, res) => {
-  const { token } = req.params;
-  const { newPassword } = req.body;
-
-  const hashedToken = crypto.createHash("sha256").update(token).digest("hex");
-
-  db.query(
-    `SELECT * FROM users WHERE reset_token = ? AND reset_token_expires > NOW()`,
-    [hashedToken],
-    async (err, results) => {
-      if (err) return res.status(500).json({ error: err.message });
-      if (results.length === 0)
-        return res.status(400).json({ message: "Invalid or expired token." });
-
-      const user = results[0];
-      const hashedPassword = await bcrypt.hash(newPassword, 10);
-
-      db.query(
-        "UPDATE users SET password = ?, reset_token = NULL, reset_token_expires = NULL WHERE id = ?",
-        [hashedPassword, user.id]
-      );
-
-      createNotification(user.id, "Password Reset", "Your password was reset.");
-
-      res.json({ message: "Password reset successful ✅" });
-    }
-  );
-};
-
-/* =====================================
    GET CURRENT USER
 ===================================== */
+
 exports.getCurrentUser = (req, res) => {
   res.json({ user: req.user });
 };
@@ -223,6 +140,7 @@ exports.getCurrentUser = (req, res) => {
 /* =====================================
    UPDATE MY PROFILE
 ===================================== */
+
 exports.updateMyProfile = (req, res) => {
   const user_id = req.user.id;
   const { name, email, position } = req.body;
@@ -233,7 +151,12 @@ exports.updateMyProfile = (req, res) => {
     (err) => {
       if (err) return res.status(500).json({ error: err.message });
 
-      createNotification(user_id, "Profile Updated", "You updated your profile.");
+      createNotification(
+        user_id,
+        "Profile Updated",
+        "You updated your profile."
+      );
+
       res.json({ message: "Profile updated successfully ✅" });
     }
   );
@@ -242,6 +165,7 @@ exports.updateMyProfile = (req, res) => {
 /* =====================================
    ADMIN USER MANAGEMENT
 ===================================== */
+
 exports.getAllUsers = (req, res) => {
   if (req.user.role !== "admin")
     return res.status(403).json({ message: "Access denied." });
@@ -268,7 +192,12 @@ exports.updateUser = (req, res) => {
     (err) => {
       if (err) return res.status(500).json({ error: err.message });
 
-      createNotification(id, "Profile Updated", "Your account was updated by admin.");
+      createNotification(
+        id,
+        "Profile Updated",
+        "Your account was updated by admin."
+      );
+
       res.json({ message: "User updated successfully ✅" });
     }
   );
@@ -282,6 +211,7 @@ exports.deleteUser = (req, res) => {
 
   db.query("DELETE FROM users WHERE id = ?", [id], (err) => {
     if (err) return res.status(500).json({ error: err.message });
+
     res.json({ message: "User deleted successfully ✅" });
   });
 };
