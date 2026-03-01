@@ -117,39 +117,70 @@ exports.changePassword = async (req, res) => {
    FORGOT PASSWORD
 ===================================== */
 
-exports.forgotPassword = (req, res) => {
-  const { email } = req.body;
-  if (!email) return res.status(400).json({ message: "Email required." });
+exports.forgotPassword = async (req, res) => {
+  try {
+    const { email } = req.body;
 
-  db.query("SELECT * FROM users WHERE email = ?", [email], async (err, results) => {
-    if (err) return res.status(500).json({ error: err.message });
-    if (results.length === 0) return res.status(400).json({ message: "User not found." });
+    if (!email)
+      return res.status(400).json({ message: "Email required." });
 
-    const user = results[0];
+    const sql = "SELECT * FROM users WHERE email = ?";
 
-    const resetToken = crypto.randomBytes(32).toString("hex");
-    const hashedToken = crypto.createHash("sha256").update(resetToken).digest("hex");
-    const expires = new Date(Date.now() + 15 * 60 * 1000);
+    db.query(sql, [email], async (err, results) => {
+      if (err) return res.status(500).json({ error: err.message });
 
-    db.query("UPDATE users SET reset_token = ?, reset_token_expires = ? WHERE id = ?", [
-      hashedToken,
-      expires,
-      user.id,
-    ]);
+      if (results.length === 0)
+        return res.status(400).json({ message: "User not found." });
 
-    const resetURL = `${process.env.FRONTEND_URL}/reset-password/${resetToken}`;
+      const user = results[0];
 
-    await transporter.sendMail({
-      from: process.env.EMAIL_USER,
-      to: user.email,
-      subject: "Password Reset - StaffSync",
-      html: `<p>Click below to reset your password:</p><a href="${resetURL}">${resetURL}</a>`,
+      const resetToken = crypto.randomBytes(32).toString("hex");
+      const hashedToken = crypto
+        .createHash("sha256")
+        .update(resetToken)
+        .digest("hex");
+
+      const expires = new Date(Date.now() + 15 * 60 * 1000);
+
+      db.query(
+        "UPDATE users SET reset_token = ?, reset_token_expires = ? WHERE id = ?",
+        [hashedToken, expires, user.id],
+        async (updateErr) => {
+          if (updateErr)
+            return res.status(500).json({ error: updateErr.message });
+
+          try {
+            const resetURL = `${process.env.FRONTEND_URL}/reset-password/${resetToken}`;
+
+            await transporter.sendMail({
+              from: process.env.EMAIL_USER,
+              to: user.email,
+              subject: "Password Reset - StaffSync",
+              html: `
+                <h3>Password Reset</h3>
+                <p>Click below:</p>
+                <a href="${resetURL}">${resetURL}</a>
+                <p>Expires in 15 minutes.</p>
+              `,
+            });
+
+            res.json({ message: "Reset link sent 📧" });
+
+          } catch (mailError) {
+            console.error("MAIL ERROR:", mailError);
+            return res.status(500).json({
+              message: "Email service failed.",
+            });
+          }
+        }
+      );
     });
 
-    res.json({ message: "Reset link sent to your email 📧" });
-  });
+  } catch (error) {
+    console.error("Forgot Password Crash:", error);
+    res.status(500).json({ message: "Server error." });
+  }
 };
-
 /* =====================================
    RESET PASSWORD
 ===================================== */
