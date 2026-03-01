@@ -32,8 +32,7 @@ const createNotification = (user_id, title, message) => {
 exports.login = (req, res) => {
   const { email, password } = req.body;
 
-  const sql = "SELECT * FROM users WHERE email = ?";
-  db.query(sql, [email], async (err, results) => {
+  db.query("SELECT * FROM users WHERE email = ?", [email], async (err, results) => {
     if (err) return res.status(500).json({ error: err.message });
     if (results.length === 0) return res.status(400).json({ message: "User not found" });
 
@@ -47,15 +46,70 @@ exports.login = (req, res) => {
 
     res.json({
       message: "Login successful ✅",
-      user: {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        position: user.position,
-      },
+      user: { id: user.id, name: user.name, email: user.email, role: user.role, position: user.position },
       token,
     });
+  });
+};
+
+/* =====================================
+   REGISTER (ADMIN ONLY)
+===================================== */
+
+exports.register = async (req, res) => {
+  if (!req.user || req.user.role !== "admin") {
+    return res.status(403).json({ message: "Access denied. Admin only." });
+  }
+
+  const { name, email, password, position, role } = req.body;
+
+  if (!name || !email || !password || !position) {
+    return res.status(400).json({ message: "All fields are required." });
+  }
+
+  const hashedPassword = await bcrypt.hash(password, 10);
+  const userRole = role === "admin" ? "admin" : "employee";
+
+  db.query(
+    `INSERT INTO users (name, email, password, role, position) VALUES (?, ?, ?, ?, ?)`,
+    [name, email, hashedPassword, userRole, position],
+    (err, result) => {
+      if (err) {
+        if (err.code === "ER_DUP_ENTRY") return res.status(400).json({ message: "Email already registered." });
+        return res.status(500).json({ error: err.message });
+      }
+
+      createNotification(result.insertId, "Account Created", "Your account has been created.");
+      res.json({ message: "User created successfully ✅" });
+    }
+  );
+};
+
+/* =====================================
+   CHANGE PASSWORD (LOGGED IN)
+===================================== */
+
+exports.changePassword = async (req, res) => {
+  const user_id = req.user.id;
+  const { currentPassword, newPassword } = req.body;
+
+  if (!currentPassword || !newPassword) {
+    return res.status(400).json({ message: "All fields required." });
+  }
+
+  db.query("SELECT password FROM users WHERE id = ?", [user_id], async (err, results) => {
+    if (err) return res.status(500).json({ error: err.message });
+
+    const user = results[0];
+    const isMatch = await bcrypt.compare(currentPassword, user.password);
+    if (!isMatch) return res.status(400).json({ message: "Current password incorrect." });
+
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+    db.query("UPDATE users SET password = ? WHERE id = ?", [hashedPassword, user_id]);
+
+    createNotification(user_id, "Password Changed", "Your password was updated.");
+    res.json({ message: "Password updated successfully ✅" });
   });
 };
 
@@ -65,26 +119,23 @@ exports.login = (req, res) => {
 
 exports.forgotPassword = (req, res) => {
   const { email } = req.body;
-
   if (!email) return res.status(400).json({ message: "Email required." });
 
-  const sql = "SELECT * FROM users WHERE email = ?";
-  db.query(sql, [email], async (err, results) => {
+  db.query("SELECT * FROM users WHERE email = ?", [email], async (err, results) => {
     if (err) return res.status(500).json({ error: err.message });
     if (results.length === 0) return res.status(400).json({ message: "User not found." });
 
     const user = results[0];
 
-    // Generate token
     const resetToken = crypto.randomBytes(32).toString("hex");
     const hashedToken = crypto.createHash("sha256").update(resetToken).digest("hex");
+    const expires = new Date(Date.now() + 15 * 60 * 1000);
 
-    const expires = new Date(Date.now() + 15 * 60 * 1000); // 15 mins
-
-    db.query(
-      "UPDATE users SET reset_token = ?, reset_token_expires = ? WHERE id = ?",
-      [hashedToken, expires, user.id]
-    );
+    db.query("UPDATE users SET reset_token = ?, reset_token_expires = ? WHERE id = ?", [
+      hashedToken,
+      expires,
+      user.id,
+    ]);
 
     const resetURL = `${process.env.FRONTEND_URL}/reset-password/${resetToken}`;
 
@@ -92,12 +143,7 @@ exports.forgotPassword = (req, res) => {
       from: process.env.EMAIL_USER,
       to: user.email,
       subject: "Password Reset - StaffSync",
-      html: `
-        <h3>Password Reset</h3>
-        <p>Click the link below to reset your password:</p>
-        <a href="${resetURL}">${resetURL}</a>
-        <p>This link expires in 15 minutes.</p>
-      `,
+      html: `<p>Click below to reset your password:</p><a href="${resetURL}">${resetURL}</a>`,
     });
 
     res.json({ message: "Reset link sent to your email 📧" });
@@ -112,31 +158,94 @@ exports.resetPassword = async (req, res) => {
   const { token } = req.params;
   const { newPassword } = req.body;
 
-  if (!newPassword) return res.status(400).json({ message: "New password required." });
-
   const hashedToken = crypto.createHash("sha256").update(token).digest("hex");
 
-  const sql = `
-    SELECT * FROM users 
-    WHERE reset_token = ? 
-    AND reset_token_expires > NOW()
-  `;
+  db.query(
+    `SELECT * FROM users WHERE reset_token = ? AND reset_token_expires > NOW()`,
+    [hashedToken],
+    async (err, results) => {
+      if (err) return res.status(500).json({ error: err.message });
+      if (results.length === 0) return res.status(400).json({ message: "Invalid or expired token." });
 
-  db.query(sql, [hashedToken], async (err, results) => {
+      const user = results[0];
+      const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+      db.query(
+        "UPDATE users SET password = ?, reset_token = NULL, reset_token_expires = NULL WHERE id = ?",
+        [hashedPassword, user.id]
+      );
+
+      createNotification(user.id, "Password Reset", "Your password was reset.");
+      res.json({ message: "Password reset successful ✅" });
+    }
+  );
+};
+
+/* =====================================
+   GET CURRENT USER
+===================================== */
+
+exports.getCurrentUser = (req, res) => {
+  res.json({ user: req.user });
+};
+
+/* =====================================
+   UPDATE MY PROFILE
+===================================== */
+
+exports.updateMyProfile = (req, res) => {
+  const user_id = req.user.id;
+  const { name, email, position } = req.body;
+
+  db.query(
+    "UPDATE users SET name = ?, email = ?, position = ? WHERE id = ?",
+    [name, email, position, user_id],
+    (err) => {
+      if (err) return res.status(500).json({ error: err.message });
+
+      createNotification(user_id, "Profile Updated", "You updated your profile.");
+      res.json({ message: "Profile updated successfully ✅" });
+    }
+  );
+};
+
+/* =====================================
+   ADMIN USER MANAGEMENT
+===================================== */
+
+exports.getAllUsers = (req, res) => {
+  if (req.user.role !== "admin") return res.status(403).json({ message: "Access denied." });
+
+  db.query("SELECT id, name, email, role, position FROM users", (err, results) => {
     if (err) return res.status(500).json({ error: err.message });
-    if (results.length === 0)
-      return res.status(400).json({ message: "Invalid or expired token." });
+    res.json(results);
+  });
+};
 
-    const user = results[0];
-    const hashedPassword = await bcrypt.hash(newPassword, 10);
+exports.updateUser = (req, res) => {
+  if (req.user.role !== "admin") return res.status(403).json({ message: "Access denied." });
 
-    db.query(
-      "UPDATE users SET password = ?, reset_token = NULL, reset_token_expires = NULL WHERE id = ?",
-      [hashedPassword, user.id]
-    );
+  const { id } = req.params;
+  const { name, email, role, position } = req.body;
 
-    createNotification(user.id, "Password Reset", "Your password was reset successfully.");
+  db.query(
+    "UPDATE users SET name = ?, email = ?, role = ?, position = ? WHERE id = ?",
+    [name, email, role, position, id],
+    (err) => {
+      if (err) return res.status(500).json({ error: err.message });
 
-    res.json({ message: "Password reset successful ✅" });
+      createNotification(id, "Profile Updated", "Your account was updated by admin.");
+      res.json({ message: "User updated successfully ✅" });
+    }
+  );
+};
+
+exports.deleteUser = (req, res) => {
+  if (req.user.role !== "admin") return res.status(403).json({ message: "Access denied." });
+
+  const { id } = req.params;
+  db.query("DELETE FROM users WHERE id = ?", [id], (err) => {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json({ message: "User deleted successfully ✅" });
   });
 };
