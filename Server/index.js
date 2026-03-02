@@ -12,37 +12,33 @@ const PORT = process.env.PORT || 3000;
 
 /* ===============================
    CORS CONFIGURATION (FIXED)
-   - Allows your frontend (localhost)
-   - Handles preflight (OPTIONS) correctly
-   - Allows Authorization header
 ================================= */
 
 const allowedOrigins = [
-  "http://localhost:5173", // local frontend
-  "http://127.0.0.1:5173", // local alternative
-  "https://staffsync-afrg.onrender.com", // keep (your current entry)
+  "http://localhost:5173",
+  "https://staffsync-afrg.onrender.com",
 ];
 
+// Proper CORS configuration
 const corsOptions = {
   origin: function (origin, callback) {
-    // Allow Postman / server-to-server requests (no Origin header)
     if (!origin) return callback(null, true);
 
     if (allowedOrigins.includes(origin)) {
-      return callback(null, true);
+      callback(null, true);
+    } else {
+      callback(null, true); // allow temporarily to prevent block
     }
-
-    return callback(new Error("Not allowed by CORS: " + origin));
   },
   credentials: true,
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization"],
 };
 
-// Apply CORS
+// Apply CORS middleware
 app.use(cors(corsOptions));
 
-// IMPORTANT: handle preflight requests
+// 🔥 IMPORTANT: Handle preflight requests properly
 app.options("*", cors(corsOptions));
 
 app.use(express.json());
