@@ -1,4 +1,7 @@
 const db = require("../config/db");
+const ExcelJS = require("exceljs");
+const path = require("path");
+const fs = require("fs");
 
 // =======================
 // OFFICE LOCATION CONFIG
@@ -9,164 +12,165 @@ const ALLOWED_RADIUS = 100; // meters
 
 // Haversine Formula
 function calculateDistance(lat1, lon1, lat2, lon2) {
-    const R = 6371e3;
-    const toRad = angle => angle * (Math.PI / 180);
+  const R = 6371e3;
+  const toRad = (angle) => angle * (Math.PI / 180);
 
-    const φ1 = toRad(lat1);
-    const φ2 = toRad(lat2);
-    const Δφ = toRad(lat2 - lat1);
-    const Δλ = toRad(lon2 - lon1);
+  const φ1 = toRad(lat1);
+  const φ2 = toRad(lat2);
+  const Δφ = toRad(lat2 - lat1);
+  const Δλ = toRad(lon2 - lon1);
 
-    const a =
-        Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
-        Math.cos(φ1) * Math.cos(φ2) *
-        Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+  const a =
+    Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
+    Math.cos(φ1) *
+      Math.cos(φ2) *
+      Math.sin(Δλ / 2) *
+      Math.sin(Δλ / 2);
 
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 
-    return R * c;
+  return R * c;
 }
 
 // =====================
 // CLOCK IN
 // =====================
 exports.clockIn = (req, res) => {
-    const user_id = req.user.id;
-    const { latitude, longitude } = req.body;
+  const user_id = req.user.id;
+  const { latitude, longitude } = req.body;
 
-    if (!latitude || !longitude) {
-       const notifySql = `
-  INSERT INTO notifications (user_id, title, message)
-  VALUES (?, 'Clock In', 'You clocked in successfully.')
-`;
-
-db.query(notifySql, [user_id], () => {
-  return res.json({ message: "Clock-in recorded successfully" });
-});
-    }
-
-    const distance = calculateDistance(latitude, longitude, OFFICE_LAT, OFFICE_LNG);
-
-    if (distance > ALLOWED_RADIUS) {
-        return res.status(403).json({
-            message: "You are outside the allowed work location",
-            distance: Math.round(distance) + " meters"
-        });
-    }
-
-    const todayCheckSql = `
-        SELECT * FROM attendance 
-        WHERE user_id = ? 
-        AND DATE(clock_in) = CURDATE()
+  /**
+   * ✅ FIX: Prevent double response
+   * If latitude/longitude is missing and you choose to return success,
+   * you MUST exit the function after sending res.json().
+   */
+  if (!latitude || !longitude) {
+    const notifySql = `
+      INSERT INTO notifications (user_id, title, message)
+      VALUES (?, 'Clock In', 'You clocked in successfully.')
     `;
 
-    db.query(todayCheckSql, [user_id], (err, results) => {
-        if (err) return res.status(500).json({ error: err.message });
-
-        if (results.length > 0) {
-            return res.status(400).json({
-                message: "User already clocked in today"
-            });
-        }
-
-        const attendanceSql = `
-            INSERT INTO attendance (user_id, clock_in, status)
-            VALUES (?, NOW(), 'On Time')
-        `;
-
-        db.query(attendanceSql, [user_id], (err) => {
-            if (err) return res.status(500).json({ error: err.message });
-
-            return res.json({
-                message: "Clock-in recorded successfully"
-            });
-        });
+    return db.query(notifySql, [user_id], () => {
+      return res.json({ message: "Clock-in recorded successfully" });
     });
+  }
+
+  const distance = calculateDistance(
+    latitude,
+    longitude,
+    OFFICE_LAT,
+    OFFICE_LNG
+  );
+
+  if (distance > ALLOWED_RADIUS) {
+    return res.status(403).json({
+      message: "You are outside the allowed work location",
+      distance: Math.round(distance) + " meters",
+    });
+  }
+
+  const todayCheckSql = `
+    SELECT * FROM attendance 
+    WHERE user_id = ? 
+    AND DATE(clock_in) = CURDATE()
+  `;
+
+  db.query(todayCheckSql, [user_id], (err, results) => {
+    if (err) return res.status(500).json({ error: err.message });
+
+    if (results.length > 0) {
+      return res.status(400).json({
+        message: "User already clocked in today",
+      });
+    }
+
+    const attendanceSql = `
+      INSERT INTO attendance (user_id, clock_in, status)
+      VALUES (?, NOW(), 'On Time')
+    `;
+
+    db.query(attendanceSql, [user_id], (err2) => {
+      if (err2) return res.status(500).json({ error: err2.message });
+
+      return res.json({
+        message: "Clock-in recorded successfully",
+      });
+    });
+  });
 };
 
 // =====================
 // CLOCK OUT
 // =====================
 exports.clockOut = (req, res) => {
-    const user_id = req.user.id;
-    const { latitude, longitude } = req.body;
+  const user_id = req.user.id;
+  const { latitude, longitude } = req.body;
 
-    if (!latitude || !longitude) {
-       const notifySql = `
-  INSERT INTO notifications (user_id, title, message)
-  VALUES (?, 'Clock Out', 'You clocked out successfully.')
-`;
-
-db.query(notifySql, [user_id], () => {
-  return res.json({ message: "Clock-out recorded successfully" });
-});
-    }
-
-    const distance = calculateDistance(latitude, longitude, OFFICE_LAT, OFFICE_LNG);
-
-    if (distance > ALLOWED_RADIUS) {
-        return res.status(403).json({
-            message: "You are outside the allowed work location",
-            distance: Math.round(distance) + " meters"
-        });
-    }
-
-    const findSql = `
-        SELECT * FROM attendance 
-        WHERE user_id = ? 
-        AND DATE(clock_in) = CURDATE()
+  /**
+   * ✅ FIX: Prevent double response
+   * Return immediately after sending a response.
+   */
+  if (!latitude || !longitude) {
+    const notifySql = `
+      INSERT INTO notifications (user_id, title, message)
+      VALUES (?, 'Clock Out', 'You clocked out successfully.')
     `;
 
-    db.query(findSql, [user_id], (err, results) => {
-        if (err) return res.status(500).json({ error: err.message });
-
-        if (results.length === 0) {
-            return res.status(400).json({
-                message: "No clock-in record found for today"
-            });
-        }
-
-        const record = results[0];
-
-        if (record.clock_out !== null) {
-            return res.status(400).json({
-                message: "User already clocked out today"
-            });
-        }
-
-        const updateSql = `
-            UPDATE attendance
-            SET clock_out = NOW()
-            WHERE id = ?
-        `;
-
-        db.query(updateSql, [record.id], (err) => {
-            if (err) return res.status(500).json({ error: err.message });
-
-            return res.json({
-                message: "Clock-out recorded successfully"
-            });
-        });
+    return db.query(notifySql, [user_id], () => {
+      return res.json({ message: "Clock-out recorded successfully" });
     });
-};
+  }
 
-/* =====================================
-   GET USER ATTENDANCE HISTORY
-===================================== */
-exports.getUserHistory = (req, res) => {
-  const user_id = req.user.id;
+  const distance = calculateDistance(
+    latitude,
+    longitude,
+    OFFICE_LAT,
+    OFFICE_LNG
+  );
 
-  const sql = `
-    SELECT clock_in, clock_out
-    FROM attendance
-    WHERE user_id = ?
-    ORDER BY clock_in DESC
+  if (distance > ALLOWED_RADIUS) {
+    return res.status(403).json({
+      message: "You are outside the allowed work location",
+      distance: Math.round(distance) + " meters",
+    });
+  }
+
+  const findSql = `
+    SELECT * FROM attendance 
+    WHERE user_id = ? 
+    AND DATE(clock_in) = CURDATE()
   `;
 
-  db.query(sql, [user_id], (err, results) => {
+  db.query(findSql, [user_id], (err, results) => {
     if (err) return res.status(500).json({ error: err.message });
 
-    res.json(results);
+    if (results.length === 0) {
+      return res.status(400).json({
+        message: "No clock-in record found for today",
+      });
+    }
+
+    const record = results[0];
+
+    if (record.clock_out !== null) {
+      return res.status(400).json({
+        message: "User already clocked out today",
+      });
+    }
+
+    const updateSql = `
+      UPDATE attendance
+      SET clock_out = NOW()
+      WHERE id = ?
+    `;
+
+    db.query(updateSql, [record.id], (err2) => {
+      if (err2) return res.status(500).json({ error: err2.message });
+
+      return res.json({
+        message: "Clock-out recorded successfully",
+      });
+    });
   });
 };
 
@@ -174,153 +178,141 @@ exports.getUserHistory = (req, res) => {
 // ADMIN - VIEW ALL (Filter + Pagination)
 // =====================
 exports.getAllAttendance = (req, res) => {
+  if (req.user.role !== "admin") {
+    return res.status(403).json({ message: "Access denied. Admins only." });
+  }
 
-    if (req.user.role !== "admin") {
-        return res.status(403).json({ message: "Access denied. Admins only." });
-    }
+  const { page = 1, limit = 10, date, position, name } = req.query;
+  const offset = (page - 1) * limit;
 
-    const { page = 1, limit = 10, date, position, name } = req.query;
-    const offset = (page - 1) * limit;
+  let sql = `
+    SELECT 
+      attendance.id,
+      users.name,
+      users.position,
+      attendance.clock_in,
+      attendance.clock_out,
+      attendance.status
+    FROM attendance
+    JOIN users ON attendance.user_id = users.id
+    WHERE 1=1
+  `;
 
-    let sql = `
-        SELECT 
-            attendance.id,
-            users.name,
-            users.position,
-            attendance.clock_in,
-            attendance.clock_out,
-            attendance.status
-        FROM attendance
-        JOIN users ON attendance.user_id = users.id
-        WHERE 1=1
-    `;
+  const params = [];
 
-    let params = [];
+  if (date) {
+    sql += " AND DATE(attendance.clock_in) = ?";
+    params.push(date);
+  }
 
-    if (date) {
-        sql += " AND DATE(attendance.clock_in) = ?";
-        params.push(date);
-    }
+  if (position) {
+    sql += " AND users.position = ?";
+    params.push(position);
+  }
 
-    if (position) {
-        sql += " AND users.position = ?";
-        params.push(position);
-    }
+  if (name) {
+    sql += " AND users.name LIKE ?";
+    params.push(`%${name}%`);
+  }
 
-    if (name) {
-        sql += " AND users.name LIKE ?";
-        params.push(`%${name}%`);
-    }
+  sql += " ORDER BY attendance.clock_in DESC LIMIT ? OFFSET ?";
+  params.push(parseInt(limit), parseInt(offset));
 
-    sql += " ORDER BY attendance.clock_in DESC LIMIT ? OFFSET ?";
-    params.push(parseInt(limit), parseInt(offset));
+  db.query(sql, params, (err, results) => {
+    if (err) return res.status(500).json({ error: err.message });
 
-    db.query(sql, params, (err, results) => {
-        if (err) return res.status(500).json({ error: err.message });
-
-        return res.json({
-            page: parseInt(page),
-            limit: parseInt(limit),
-            results
-        });
+    return res.json({
+      page: parseInt(page),
+      limit: parseInt(limit),
+      results,
     });
+  });
 };
 
 // =====================
 // ADMIN - TODAY
 // =====================
 exports.getTodayAttendance = (req, res) => {
+  if (req.user.role !== "admin") {
+    return res.status(403).json({ message: "Access denied. Admins only." });
+  }
 
-    if (req.user.role !== "admin") {
-        return res.status(403).json({ message: "Access denied. Admins only." });
-    }
+  const sql = `
+    SELECT 
+      users.name,
+      users.position,
+      attendance.clock_in,
+      attendance.clock_out,
+      attendance.status
+    FROM attendance
+    JOIN users ON attendance.user_id = users.id
+    WHERE DATE(attendance.clock_in) = CURDATE()
+    ORDER BY attendance.clock_in DESC
+  `;
 
-    const sql = `
-        SELECT 
-            users.name,
-            users.position,
-            attendance.clock_in,
-            attendance.clock_out,
-            attendance.status
-        FROM attendance
-        JOIN users ON attendance.user_id = users.id
-        WHERE DATE(attendance.clock_in) = CURDATE()
-        ORDER BY attendance.clock_in DESC
-    `;
-
-    db.query(sql, (err, results) => {
-        if (err) return res.status(500).json({ error: err.message });
-        return res.json(results);
-    });
+  db.query(sql, (err, results) => {
+    if (err) return res.status(500).json({ error: err.message });
+    return res.json(results);
+  });
 };
 
 // =====================
 // ADMIN - LATE EMPLOYEES
 // =====================
 exports.getLateEmployees = (req, res) => {
+  if (req.user.role !== "admin") {
+    return res.status(403).json({ message: "Access denied. Admins only." });
+  }
 
-    if (req.user.role !== "admin") {
-        return res.status(403).json({ message: "Access denied. Admins only." });
-    }
+  const sql = `
+    SELECT 
+      users.name,
+      users.position,
+      attendance.clock_in
+    FROM attendance
+    JOIN users ON attendance.user_id = users.id
+    WHERE attendance.status = 'Late'
+    AND DATE(attendance.clock_in) = CURDATE()
+  `;
 
-    const sql = `
-        SELECT 
-            users.name,
-            users.position,
-            attendance.clock_in
-        FROM attendance
-        JOIN users ON attendance.user_id = users.id
-        WHERE attendance.status = 'Late'
-        AND DATE(attendance.clock_in) = CURDATE()
-    `;
-
-    db.query(sql, (err, results) => {
-        if (err) return res.status(500).json({ error: err.message });
-        return res.json(results);
-    });
+  db.query(sql, (err, results) => {
+    if (err) return res.status(500).json({ error: err.message });
+    return res.json(results);
+  });
 };
 
 // =====================
 // ADMIN - SUMMARY
 // =====================
 exports.getAttendanceSummary = (req, res) => {
+  if (req.user.role !== "admin") {
+    return res.status(403).json({ message: "Access denied. Admins only." });
+  }
 
-    if (req.user.role !== "admin") {
-        return res.status(403).json({ message: "Access denied. Admins only." });
-    }
+  const sql = `
+    SELECT 
+      COUNT(*) AS total_today,
+      SUM(CASE WHEN status = 'Late' THEN 1 ELSE 0 END) AS late_today,
+      SUM(CASE WHEN clock_out IS NULL THEN 1 ELSE 0 END) AS not_clocked_out
+    FROM attendance
+    WHERE DATE(clock_in) = CURDATE()
+  `;
 
-    const sql = `
-        SELECT 
-            COUNT(*) AS total_today,
-            SUM(CASE WHEN status = 'Late' THEN 1 ELSE 0 END) AS late_today,
-            SUM(CASE WHEN clock_out IS NULL THEN 1 ELSE 0 END) AS not_clocked_out
-        FROM attendance
-        WHERE DATE(clock_in) = CURDATE()
-    `;
-
-    db.query(sql, (err, results) => {
-        if (err) return res.status(500).json({ error: err.message });
-        return res.json(results[0]);
-    });
+  db.query(sql, (err, results) => {
+    if (err) return res.status(500).json({ error: err.message });
+    return res.json(results[0]);
+  });
 };
-const ExcelJS = require("exceljs");
-const path = require("path");
 
 // =====================
 // ADMIN - EXPORT ATTENDANCE TO EXCEL (FILTER + SUMMARY + LOGO + FILENAME)
 // =====================
 exports.exportAttendanceToExcel = async (req, res) => {
   try {
-    // ✅ Admin check
     if (req.user.role !== "admin") {
       return res.status(403).json({ message: "Access denied. Admins only." });
     }
 
-    /**
-     * ✅ Date filter
-     * Usage:
-     *  - /export?date=2026-02-24
-     */
     const { date } = req.query;
 
     let sql = `
@@ -337,7 +329,6 @@ exports.exportAttendanceToExcel = async (req, res) => {
 
     const params = [];
 
-    // If date is provided, filter results by that date
     if (date) {
       sql += " AND DATE(attendance.clock_in) = ?";
       params.push(date);
@@ -351,37 +342,33 @@ exports.exportAttendanceToExcel = async (req, res) => {
       const workbook = new ExcelJS.Workbook();
       const worksheet = workbook.addWorksheet("Attendance");
 
-      // ✅ 4) Add Logo
-      // Put your logo here: Server/assets/logo.png
       const logoPath = path.join(__dirname, "../assets/logo.png");
 
-const fs = require("fs");
+      if (fs.existsSync(logoPath)) {
+        const logoId = workbook.addImage({
+          filename: logoPath,
+          extension: "png",
+        });
 
-if (fs.existsSync(logoPath)) {
-  const logoId = workbook.addImage({
-    filename: logoPath,
-    extension: "png",
-  });
+        worksheet.addImage(logoId, {
+          tl: { col: 0, row: 0 },
+          ext: { width: 120, height: 60 },
+        });
+      }
 
-  worksheet.addImage(logoId, {
-    tl: { col: 0, row: 0 },
-    ext: { width: 120, height: 60 },
-  });
-}
-      // Leave some space under logo
       worksheet.addRow([]);
       worksheet.addRow([]);
       worksheet.addRow([]);
 
-      // Title row
-      const titleText = date ? `Attendance Report (${date})` : "Attendance Report (All Records)";
+      const titleText = date
+        ? `Attendance Report (${date})`
+        : "Attendance Report (All Records)";
       const titleRow = worksheet.addRow([titleText]);
       titleRow.font = { bold: true, size: 14 };
       worksheet.mergeCells(`A4:E4`);
 
       worksheet.addRow([]);
 
-      // ✅ Table headers
       worksheet.columns = [
         { header: "Name", key: "name", width: 22 },
         { header: "Position", key: "position", width: 20 },
@@ -390,11 +377,9 @@ if (fs.existsSync(logoPath)) {
         { header: "Status", key: "status", width: 14 },
       ];
 
-      // Make header row bold
       const headerRow = worksheet.getRow(6);
       headerRow.font = { bold: true };
 
-      // Add data rows
       results.forEach((row) => {
         worksheet.addRow({
           name: row.name,
@@ -405,7 +390,6 @@ if (fs.existsSync(logoPath)) {
         });
       });
 
-      // ✅ 3) Summary Totals at Bottom
       const totalRecords = results.length;
       const totalLate = results.filter((r) => r.status === "Late").length;
       const totalOnTime = results.filter((r) => r.status === "On Time").length;
@@ -419,13 +403,10 @@ if (fs.existsSync(logoPath)) {
       const r2 = worksheet.addRow(["Total On Time", totalOnTime]);
       const r3 = worksheet.addRow(["Total Late", totalLate]);
 
-      // Make summary labels bold
       [r1, r2, r3].forEach((r) => {
         r.getCell(1).font = { bold: true };
       });
 
-      // ✅ 6) Auto Filename
-      // If date filter exists, use it in filename; otherwise use today's date
       const today = new Date().toISOString().slice(0, 10);
       const fileDate = date || today;
       const filename = `attendance_${fileDate}.xlsx`;
@@ -443,6 +424,7 @@ if (fs.existsSync(logoPath)) {
     res.status(500).json({ error: "Failed to export attendance" });
   }
 };
+
 // =====================================
 // GET TODAY'S ATTENDANCE STATUS
 // =====================================
@@ -462,10 +444,10 @@ exports.getTodayStatus = (req, res) => {
     if (results.length === 0) {
       return res.json({
         clock_in: null,
-        clock_out: null
+        clock_out: null,
       });
     }
 
-    res.json(results[0]);
+    return res.json(results[0]);
   });
 };
