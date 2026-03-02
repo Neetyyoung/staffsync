@@ -286,14 +286,59 @@ exports.getAttendanceSummary = (req, res) => {
 };
 
 /* =====================================
-   ADMIN - EXPORT (Temporary Simple Version)
+   ADMIN - EXPORT ATTENDANCE TO EXCEL
 ===================================== */
 exports.exportAttendanceToExcel = async (req, res) => {
-  if (req.user.role !== "admin") {
-    return res.status(403).json({ message: "Admins only." });
-  }
+  try {
+    if (req.user.role !== "admin") {
+      return res.status(403).json({ message: "Admins only." });
+    }
 
-  return res.status(501).json({
-    message: "Export not enabled in this version.",
-  });
+    const sql = `
+      SELECT attendance.*, users.name, users.position
+      FROM attendance
+      JOIN users ON attendance.user_id = users.id
+      ORDER BY attendance.clock_in DESC
+    `;
+
+    db.query(sql, async (err, results) => {
+      if (err) return res.status(500).json({ error: err.message });
+
+      const workbook = new ExcelJS.Workbook();
+      const worksheet = workbook.addWorksheet("Attendance");
+
+      worksheet.columns = [
+        { header: "Name", key: "name", width: 25 },
+        { header: "Position", key: "position", width: 20 },
+        { header: "Clock In", key: "clock_in", width: 25 },
+        { header: "Clock Out", key: "clock_out", width: 25 },
+        { header: "Status", key: "status", width: 15 },
+      ];
+
+      results.forEach((row) => {
+        worksheet.addRow({
+          name: row.name,
+          position: row.position,
+          clock_in: row.clock_in,
+          clock_out: row.clock_out,
+          status: row.status,
+        });
+      });
+
+      res.setHeader(
+        "Content-Type",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+      );
+
+      res.setHeader(
+        "Content-Disposition",
+        "attachment; filename=attendance.xlsx"
+      );
+
+      await workbook.xlsx.write(res);
+      res.end();
+    });
+  } catch (error) {
+    res.status(500).json({ error: "Failed to export attendance" });
+  }
 };
