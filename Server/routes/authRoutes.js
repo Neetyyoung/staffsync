@@ -39,15 +39,14 @@ router.get("/users", authenticateToken, authController.getAllUsers);
 // Update user details
 router.put("/users/:id", authenticateToken, authController.updateUser);
 
-// 🔁 Toggle user status (active / suspended)
+// Suspend or activate user
 router.put(
   "/users/:id/status",
   authenticateToken,
   authController.toggleUserStatus
 );
 
-// Delete user permanently
+// Delete user
 router.delete("/users/:id", authenticateToken, authController.deleteUser);
-
 
 module.exports = router;
