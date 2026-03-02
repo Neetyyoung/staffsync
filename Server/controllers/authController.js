@@ -272,6 +272,8 @@ exports.toggleUserStatus = (req, res) => {
 
 /* =====================================
    ADMIN: DELETE USER
+   -------------------------------------
+   Prevent deleting the last admin
 ===================================== */
 exports.deleteUser = (req, res) => {
   if (req.user.role !== "admin")
@@ -279,9 +281,49 @@ exports.deleteUser = (req, res) => {
 
   const { id } = req.params;
 
+  // First, check if the user to be deleted is an admin
+  db.query("SELECT role FROM users WHERE id = ?", [id], (err, results) => {
+    if (err) return res.status(500).json({ error: err.message });
+
+    if (results.length === 0)
+      return res.status(404).json({ message: "User not found." });
+
+    const userToDelete = results[0];
+
+    if (userToDelete.role === "admin") {
+      // Count total admins
+      db.query(
+        "SELECT COUNT(*) AS adminCount FROM users WHERE role = 'admin'",
+        (err2, countResult) => {
+          if (err2)
+            return res.status(500).json({ error: err2.message });
+
+          const adminCount = countResult[0].adminCount;
+
+          // 🚫 Prevent deleting last admin
+          if (adminCount <= 1) {
+            return res.status(400).json({
+              message:
+                "Cannot delete the last admin account. At least one admin must remain.",
+            });
+          }
+
+          // Safe to delete
+          deleteUserNow(id, res);
+        }
+      );
+    } else {
+      // Not an admin, safe to delete
+      deleteUserNow(id, res);
+    }
+  });
+};
+
+// Helper function to delete
+function deleteUserNow(id, res) {
   db.query("DELETE FROM users WHERE id = ?", [id], (err) => {
     if (err) return res.status(500).json({ error: err.message });
 
     res.json({ message: "User deleted successfully ✅" });
   });
-};
+}
