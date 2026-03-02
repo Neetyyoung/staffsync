@@ -181,3 +181,119 @@ exports.getTodayStatus = (req, res) => {
     return res.json(results[0]);
   });
 };
+/* =====================================
+   GET USER HISTORY
+===================================== */
+exports.getUserHistory = (req, res) => {
+  const user_id = req.user.id;
+
+  const sql = `
+    SELECT *
+    FROM attendance
+    WHERE user_id = ?
+    ORDER BY clock_in DESC
+  `;
+
+  db.query(sql, [user_id], (err, results) => {
+    if (err) return res.status(500).json({ error: err.message });
+    return res.json(results);
+  });
+};
+
+/* =====================================
+   ADMIN - VIEW ALL ATTENDANCE
+===================================== */
+exports.getAllAttendance = (req, res) => {
+  if (req.user.role !== "admin") {
+    return res.status(403).json({ message: "Admins only." });
+  }
+
+  const sql = `
+    SELECT attendance.*, users.name, users.position
+    FROM attendance
+    JOIN users ON attendance.user_id = users.id
+    ORDER BY attendance.clock_in DESC
+  `;
+
+  db.query(sql, (err, results) => {
+    if (err) return res.status(500).json({ error: err.message });
+    return res.json(results);
+  });
+};
+
+/* =====================================
+   ADMIN - TODAY ATTENDANCE
+===================================== */
+exports.getTodayAttendance = (req, res) => {
+  if (req.user.role !== "admin") {
+    return res.status(403).json({ message: "Admins only." });
+  }
+
+  const sql = `
+    SELECT attendance.*, users.name
+    FROM attendance
+    JOIN users ON attendance.user_id = users.id
+    WHERE DATE(clock_in) = CURDATE()
+    ORDER BY clock_in DESC
+  `;
+
+  db.query(sql, (err, results) => {
+    if (err) return res.status(500).json({ error: err.message });
+    return res.json(results);
+  });
+};
+
+/* =====================================
+   ADMIN - LATE EMPLOYEES
+===================================== */
+exports.getLateEmployees = (req, res) => {
+  if (req.user.role !== "admin") {
+    return res.status(403).json({ message: "Admins only." });
+  }
+
+  const sql = `
+    SELECT attendance.*, users.name
+    FROM attendance
+    JOIN users ON attendance.user_id = users.id
+    WHERE status = 'Late'
+    AND DATE(clock_in) = CURDATE()
+  `;
+
+  db.query(sql, (err, results) => {
+    if (err) return res.status(500).json({ error: err.message });
+    return res.json(results);
+  });
+};
+
+/* =====================================
+   ADMIN - SUMMARY
+===================================== */
+exports.getAttendanceSummary = (req, res) => {
+  if (req.user.role !== "admin") {
+    return res.status(403).json({ message: "Admins only." });
+  }
+
+  const sql = `
+    SELECT COUNT(*) AS total_today
+    FROM attendance
+    WHERE DATE(clock_in) = CURDATE()
+  `;
+
+  db.query(sql, (err, results) => {
+    if (err) return res.status(500).json({ error: err.message });
+    return res.json(results[0]);
+  });
+};
+
+/* =====================================
+   ADMIN - EXPORT (Temporary Simple Version)
+===================================== */
+exports.exportAttendanceToExcel = (req, res) => {
+  if (req.user.role !== "admin") {
+    return res.status(403).json({ message: "Admins only." });
+  }
+
+  return res.status(501).json({
+    message: "Export not enabled in this version.",
+  });
+};
