@@ -4,6 +4,8 @@ const jwt = require("jsonwebtoken");
 
 /* =====================================
    HELPER: CREATE NOTIFICATION
+   -------------------------------------
+   Creates a system notification for a user
 ===================================== */
 const createNotification = (user_id, title, message) => {
   const sql =
@@ -13,6 +15,9 @@ const createNotification = (user_id, title, message) => {
 
 /* =====================================
    LOGIN
+   -------------------------------------
+   Authenticates user and returns JWT token
+   Blocks suspended users
 ===================================== */
 exports.login = (req, res) => {
   const { email, password } = req.body;
@@ -28,10 +33,11 @@ exports.login = (req, res) => {
 
       const user = results[0];
 
-      // 🔒 BLOCK SUSPENDED USERS
+      // 🔒 Block suspended users
       if (user.status === "suspended") {
         return res.status(403).json({
-          message: "Your account has been suspended. Contact administrator.",
+          message:
+            "Your account has been suspended. Contact administrator.",
         });
       }
 
@@ -40,6 +46,7 @@ exports.login = (req, res) => {
       if (!isMatch)
         return res.status(400).json({ message: "Invalid password" });
 
+      // Generate JWT
       const token = jwt.sign(
         { id: user.id, role: user.role },
         process.env.JWT_SECRET,
@@ -56,7 +63,7 @@ exports.login = (req, res) => {
           email: user.email,
           role: user.role,
           position: user.position,
-          status: user.status, // ✅ include status
+          status: user.status,
         },
         token,
       });
@@ -66,6 +73,8 @@ exports.login = (req, res) => {
 
 /* =====================================
    REGISTER (ADMIN ONLY)
+   -------------------------------------
+   Creates new user account
 ===================================== */
 exports.register = async (req, res) => {
   if (!req.user || req.user.role !== "admin") {
@@ -78,36 +87,43 @@ exports.register = async (req, res) => {
     return res.status(400).json({ message: "All fields are required." });
   }
 
-  const hashedPassword = await bcrypt.hash(password, 10);
-  const userRole = role === "admin" ? "admin" : "employee";
+  try {
+    const hashedPassword = await bcrypt.hash(password, 10);
+    const userRole = role === "admin" ? "admin" : "employee";
 
-  db.query(
-    `INSERT INTO users (name, email, password, role, position, status) 
-     VALUES (?, ?, ?, ?, ?, 'active')`,
-    [name, email, hashedPassword, userRole, position],
-    (err, result) => {
-      if (err) {
-        if (err.code === "ER_DUP_ENTRY")
-          return res
-            .status(400)
-            .json({ message: "Email already registered." });
+    db.query(
+      `INSERT INTO users 
+       (name, email, password, role, position, status) 
+       VALUES (?, ?, ?, ?, ?, 'active')`,
+      [name, email, hashedPassword, userRole, position],
+      (err, result) => {
+        if (err) {
+          if (err.code === "ER_DUP_ENTRY")
+            return res
+              .status(400)
+              .json({ message: "Email already registered." });
 
-        return res.status(500).json({ error: err.message });
+          return res.status(500).json({ error: err.message });
+        }
+
+        createNotification(
+          result.insertId,
+          "Account Created",
+          "Your account has been created."
+        );
+
+        res.json({ message: "User created successfully ✅" });
       }
-
-      createNotification(
-        result.insertId,
-        "Account Created",
-        "Your account has been created."
-      );
-
-      res.json({ message: "User created successfully ✅" });
-    }
-  );
+    );
+  } catch (error) {
+    res.status(500).json({ error: "Registration failed." });
+  }
 };
 
 /* =====================================
    CHANGE PASSWORD
+   -------------------------------------
+   Allows logged-in user to update password
 ===================================== */
 exports.changePassword = async (req, res) => {
   const user_id = req.user.id;
@@ -124,6 +140,7 @@ exports.changePassword = async (req, res) => {
       if (err) return res.status(500).json({ error: err.message });
 
       const user = results[0];
+
       const isMatch = await bcrypt.compare(
         currentPassword,
         user.password
@@ -228,6 +245,8 @@ exports.updateUser = (req, res) => {
 
 /* =====================================
    ADMIN: TOGGLE USER STATUS
+   -------------------------------------
+   Allows admin to suspend or activate user
 ===================================== */
 exports.toggleUserStatus = (req, res) => {
   if (req.user.role !== "admin")
