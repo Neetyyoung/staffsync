@@ -288,7 +288,7 @@ exports.getAttendanceSummary = (req, res) => {
 /* =====================================
    ADMIN - EXPORT (Temporary Simple Version)
 ===================================== */
-exports.exportAttendanceToExcel = (req, res) => {
+exports.exportAttendanceToExcel = async (req, res) => {
   if (req.user.role !== "admin") {
     return res.status(403).json({ message: "Admins only." });
   }
