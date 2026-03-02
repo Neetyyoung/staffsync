@@ -150,6 +150,26 @@ db.query(notifySql, [user_id], () => {
     });
 };
 
+/* =====================================
+   GET USER ATTENDANCE HISTORY
+===================================== */
+exports.getUserHistory = (req, res) => {
+  const user_id = req.user.id;
+
+  const sql = `
+    SELECT clock_in, clock_out
+    FROM attendance
+    WHERE user_id = ?
+    ORDER BY clock_in DESC
+  `;
+
+  db.query(sql, [user_id], (err, results) => {
+    if (err) return res.status(500).json({ error: err.message });
+
+    res.json(results);
+  });
+};
+
 // =====================
 // ADMIN - VIEW ALL (Filter + Pagination)
 // =====================
