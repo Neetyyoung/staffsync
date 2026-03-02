@@ -5,56 +5,68 @@ const jwt = require("jsonwebtoken");
 /* =====================================
    HELPER: CREATE NOTIFICATION
 ===================================== */
-
 const createNotification = (user_id, title, message) => {
-  const sql = `INSERT INTO notifications (user_id, title, message) VALUES (?, ?, ?)`;
+  const sql =
+    "INSERT INTO notifications (user_id, title, message) VALUES (?, ?, ?)";
   db.query(sql, [user_id, title, message], () => {});
 };
 
 /* =====================================
    LOGIN
 ===================================== */
-
 exports.login = (req, res) => {
   const { email, password } = req.body;
 
-  db.query("SELECT * FROM users WHERE email = ?", [email], async (err, results) => {
-    if (err) return res.status(500).json({ error: err.message });
-    if (results.length === 0)
-      return res.status(400).json({ message: "User not found" });
+  db.query(
+    "SELECT * FROM users WHERE email = ?",
+    [email],
+    async (err, results) => {
+      if (err) return res.status(500).json({ error: err.message });
 
-    const user = results[0];
-    const isMatch = await bcrypt.compare(password, user.password);
+      if (results.length === 0)
+        return res.status(400).json({ message: "User not found" });
 
-    if (!isMatch)
-      return res.status(400).json({ message: "Invalid password" });
+      const user = results[0];
 
-    const token = jwt.sign(
-      { id: user.id, role: user.role },
-      process.env.JWT_SECRET,
-      { expiresIn: "7d" }
-    );
+      // 🔒 BLOCK SUSPENDED USERS
+      if (user.status === "suspended") {
+        return res.status(403).json({
+          message: "Your account has been suspended. Contact administrator.",
+        });
+      }
 
-    createNotification(user.id, "Login", "You signed in successfully.");
+      const isMatch = await bcrypt.compare(password, user.password);
 
-    res.json({
-      message: "Login successful ✅",
-      user: {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        position: user.position,
-      },
-      token,
-    });
-  });
+      if (!isMatch)
+        return res.status(400).json({ message: "Invalid password" });
+
+      const token = jwt.sign(
+        { id: user.id, role: user.role },
+        process.env.JWT_SECRET,
+        { expiresIn: "7d" }
+      );
+
+      createNotification(user.id, "Login", "You signed in successfully.");
+
+      res.json({
+        message: "Login successful ✅",
+        user: {
+          id: user.id,
+          name: user.name,
+          email: user.email,
+          role: user.role,
+          position: user.position,
+          status: user.status, // ✅ include status
+        },
+        token,
+      });
+    }
+  );
 };
 
 /* =====================================
    REGISTER (ADMIN ONLY)
 ===================================== */
-
 exports.register = async (req, res) => {
   if (!req.user || req.user.role !== "admin") {
     return res.status(403).json({ message: "Access denied. Admin only." });
@@ -70,12 +82,15 @@ exports.register = async (req, res) => {
   const userRole = role === "admin" ? "admin" : "employee";
 
   db.query(
-    `INSERT INTO users (name, email, password, role, position) VALUES (?, ?, ?, ?, ?)`,
+    `INSERT INTO users (name, email, password, role, position, status) 
+     VALUES (?, ?, ?, ?, ?, 'active')`,
     [name, email, hashedPassword, userRole, position],
     (err, result) => {
       if (err) {
         if (err.code === "ER_DUP_ENTRY")
-          return res.status(400).json({ message: "Email already registered." });
+          return res
+            .status(400)
+            .json({ message: "Email already registered." });
 
         return res.status(500).json({ error: err.message });
       }
@@ -92,9 +107,8 @@ exports.register = async (req, res) => {
 };
 
 /* =====================================
-   CHANGE PASSWORD (LOGGED IN USER)
+   CHANGE PASSWORD
 ===================================== */
-
 exports.changePassword = async (req, res) => {
   const user_id = req.user.id;
   const { currentPassword, newPassword } = req.body;
@@ -103,36 +117,44 @@ exports.changePassword = async (req, res) => {
     return res.status(400).json({ message: "All fields required." });
   }
 
-  db.query("SELECT password FROM users WHERE id = ?", [user_id], async (err, results) => {
-    if (err) return res.status(500).json({ error: err.message });
+  db.query(
+    "SELECT password FROM users WHERE id = ?",
+    [user_id],
+    async (err, results) => {
+      if (err) return res.status(500).json({ error: err.message });
 
-    const user = results[0];
-    const isMatch = await bcrypt.compare(currentPassword, user.password);
+      const user = results[0];
+      const isMatch = await bcrypt.compare(
+        currentPassword,
+        user.password
+      );
 
-    if (!isMatch)
-      return res.status(400).json({ message: "Current password incorrect." });
+      if (!isMatch)
+        return res
+          .status(400)
+          .json({ message: "Current password incorrect." });
 
-    const hashedPassword = await bcrypt.hash(newPassword, 10);
+      const hashedPassword = await bcrypt.hash(newPassword, 10);
 
-    db.query("UPDATE users SET password = ? WHERE id = ?", [
-      hashedPassword,
-      user_id,
-    ]);
+      db.query(
+        "UPDATE users SET password = ? WHERE id = ?",
+        [hashedPassword, user_id]
+      );
 
-    createNotification(
-      user_id,
-      "Password Changed",
-      "Your password was updated."
-    );
+      createNotification(
+        user_id,
+        "Password Changed",
+        "Your password was updated."
+      );
 
-    res.json({ message: "Password updated successfully ✅" });
-  });
+      res.json({ message: "Password updated successfully ✅" });
+    }
+  );
 };
 
 /* =====================================
    GET CURRENT USER
 ===================================== */
-
 exports.getCurrentUser = (req, res) => {
   res.json({ user: req.user });
 };
@@ -140,7 +162,6 @@ exports.getCurrentUser = (req, res) => {
 /* =====================================
    UPDATE MY PROFILE
 ===================================== */
-
 exports.updateMyProfile = (req, res) => {
   const user_id = req.user.id;
   const { name, email, position } = req.body;
@@ -163,15 +184,14 @@ exports.updateMyProfile = (req, res) => {
 };
 
 /* =====================================
-   ADMIN USER MANAGEMENT
+   ADMIN: GET ALL USERS
 ===================================== */
-
 exports.getAllUsers = (req, res) => {
   if (req.user.role !== "admin")
     return res.status(403).json({ message: "Access denied." });
 
   db.query(
-    "SELECT id, name, email, role, position FROM users",
+    "SELECT id, name, email, role, position, status FROM users",
     (err, results) => {
       if (err) return res.status(500).json({ error: err.message });
       res.json(results);
@@ -179,6 +199,9 @@ exports.getAllUsers = (req, res) => {
   );
 };
 
+/* =====================================
+   ADMIN: UPDATE USER
+===================================== */
 exports.updateUser = (req, res) => {
   if (req.user.role !== "admin")
     return res.status(403).json({ message: "Access denied." });
@@ -203,6 +226,34 @@ exports.updateUser = (req, res) => {
   );
 };
 
+/* =====================================
+   ADMIN: TOGGLE USER STATUS
+===================================== */
+exports.toggleUserStatus = (req, res) => {
+  if (req.user.role !== "admin")
+    return res.status(403).json({ message: "Access denied." });
+
+  const { id } = req.params;
+  const { status } = req.body;
+
+  if (!["active", "suspended"].includes(status)) {
+    return res.status(400).json({ message: "Invalid status." });
+  }
+
+  db.query(
+    "UPDATE users SET status = ? WHERE id = ?",
+    [status, id],
+    (err) => {
+      if (err) return res.status(500).json({ error: err.message });
+
+      res.json({ message: "User status updated successfully ✅" });
+    }
+  );
+};
+
+/* =====================================
+   ADMIN: DELETE USER
+===================================== */
 exports.deleteUser = (req, res) => {
   if (req.user.role !== "admin")
     return res.status(403).json({ message: "Access denied." });
