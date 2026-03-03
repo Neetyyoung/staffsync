@@ -49,7 +49,6 @@ app.use(express.json());
 ================================= */
 
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
-app.use("/uploads", express.static("Server/uploads"));
 app.use("/api/auth", authRoutes);
 app.use("/api/attendance", attendanceRoutes);
 app.use("/api/notifications", notificationRoutes);
