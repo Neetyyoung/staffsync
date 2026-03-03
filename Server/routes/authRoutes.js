@@ -28,6 +28,13 @@ router.get("/me", authenticateToken, authController.getCurrentUser);
 // Update own profile
 router.put("/me", authenticateToken, authController.updateMyProfile);
 
+/* NEW: Upload profile image */
+router.post(
+  "/upload-profile",
+  authenticateToken,
+  authController.upload.single("profile"),
+  authController.uploadProfileImage
+);
 
 /* =====================================
    ADMIN ROUTES

@@ -1,6 +1,42 @@
 const bcrypt = require("bcrypt");
 const db = require("../config/db");
 const jwt = require("jsonwebtoken");
+const multer = require("multer");
+const path = require("path");
+
+/* =====================================
+   MULTER CONFIGURATION
+===================================== */
+
+const storage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    cb(null, "Server/uploads/");
+  },
+  filename: function (req, file, cb) {
+    const uniqueName =
+      Date.now() + "-" + file.originalname.replace(/\s+/g, "");
+    cb(null, uniqueName);
+  },
+});
+
+const fileFilter = (req, file, cb) => {
+  if (
+    file.mimetype === "image/jpeg" ||
+    file.mimetype === "image/png" ||
+    file.mimetype === "image/jpg"
+  ) {
+    cb(null, true);
+  } else {
+    cb(new Error("Only image files are allowed"), false);
+  }
+};
+
+exports.upload = multer({
+  storage,
+  fileFilter,
+});
+
+
 
 /* =====================================
    HELPER: CREATE NOTIFICATION
@@ -34,7 +70,7 @@ exports.login = (req, res) => {
       const user = results[0];
 
       // 🔒 Block suspended users
-      if (user.status === "suspended") {
+       if (user.status === "suspended") {
         return res.status(403).json({
           message:
             "Your account has been suspended. Contact administrator.",
@@ -64,8 +100,42 @@ exports.login = (req, res) => {
           role: user.role,
           position: user.position,
           status: user.status,
+          profile_image: user.profile_image || null,
         },
         token,
+      });
+    }
+  );
+};
+
+/* =====================================
+   UPLOAD PROFILE PICTURE
+===================================== */
+
+exports.uploadProfileImage = (req, res) => {
+  const user_id = req.user.id;
+
+  if (!req.file) {
+    return res.status(400).json({ message: "No file uploaded." });
+  }
+
+  const imagePath = req.file.filename;
+
+  db.query(
+    "UPDATE users SET profile_image = ? WHERE id = ?",
+    [imagePath, user_id],
+    (err) => {
+      if (err) return res.status(500).json({ error: err.message });
+
+      createNotification(
+        user_id,
+        "Profile Picture Updated",
+        "Your profile picture was updated."
+      );
+
+      res.json({
+        message: "Profile picture updated successfully ✅",
+        profile_image: imagePath,
       });
     }
   );
