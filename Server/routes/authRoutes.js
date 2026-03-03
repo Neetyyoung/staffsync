@@ -3,7 +3,7 @@ const router = express.Router();
 
 const authenticateToken = require("../middleware/authMiddleware");
 const authController = require("../controllers/authController");
-
+const upload = authController.upload;
 /* =====================================
    PUBLIC ROUTES
 ===================================== */
@@ -32,7 +32,7 @@ router.put("/me", authenticateToken, authController.updateMyProfile);
 router.post(
   "/upload-profile",
   authenticateToken,
-  authController.upload.single("profile"),
+  upload.single("profile"),
   authController.uploadProfileImage
 );
 
