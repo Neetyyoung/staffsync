@@ -295,10 +295,15 @@ exports.exportAttendanceToExcel = async (req, res) => {
     }
 
     const sql = `
-      SELECT attendance.*, users.name, users.position
-      FROM attendance
-      JOIN users ON attendance.user_id = users.id
-      ORDER BY attendance.clock_in DESC
+      SELECT 
+u.name,
+u.position,
+DATE_FORMAT(a.clock_in, '%Y-%m-%d %H:%i:%s') AS clock_in,
+DATE_FORMAT(a.clock_out, '%Y-%m-%d %H:%i:%s') AS clock_out,
+a.status
+FROM attendance a
+JOIN users u ON a.user_id = u.id
+ORDER BY a.clock_in DESC
     `;
 
     db.query(sql, async (err, results) => {
