@@ -48,6 +48,17 @@ const createNotification = (user_id, title, message) => {
     "INSERT INTO notifications (user_id, title, message) VALUES (?, ?, ?)";
   db.query(sql, [user_id, title, message], () => {});
 };
+const notifyAdmins = (title, message) => {
+  const sql = "SELECT id FROM users WHERE role = 'admin'";
+
+  db.query(sql, (err, admins) => {
+    if (err) return;
+
+    admins.forEach((admin) => {
+      createNotification(admin.id, title, message);
+    });
+  });
+};
 
 /* =====================================
    LOGIN
@@ -90,7 +101,9 @@ exports.login = (req, res) => {
       );
 
       createNotification(user.id, "Login", "You signed in successfully.");
-
+if (user.role === "employee") {
+  notifyAdmins("Employee Login", `${user.name} logged into the system.`);
+}
       res.json({
         message: "Login successful ✅",
         user: {
@@ -181,7 +194,11 @@ exports.register = async (req, res) => {
           "Account Created",
           "Your account has been created."
         );
-
+// Notify admins that a new employee was created
+notifyAdmins(
+  "New Employee",
+  `${name} was added to the system.`
+);
         res.json({ message: "User created successfully ✅" });
       }
     );
@@ -233,7 +250,10 @@ exports.changePassword = async (req, res) => {
         "Password Changed",
         "Your password was updated."
       );
-
+notifyAdmins(
+  "Password Changed",
+  `${name} changed their password.`
+);
       res.json({ message: "Password updated successfully ✅" });
     }
   );
