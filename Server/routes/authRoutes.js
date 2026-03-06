@@ -20,7 +20,7 @@ router.post("/login", authController.login);
 router.post("/register", authenticateToken, authController.register);
 
 // Change password (Logged-in user)
-router.post("/change-password", authenticateToken, authController.changePassword);
+router.put("/change-password", authenticateToken, authController.changePassword);
 
 // Get current logged-in user
 router.get("/me", authenticateToken, authController.getCurrentUser);
