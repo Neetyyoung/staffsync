@@ -7,7 +7,7 @@ exports.getMyNotifications = (req, res) => {
   const sql = `
     SELECT id, title, message, is_read, created_at
     FROM notifications
-    WHERE user_id = ?
+    WHERE user_id = ? AND is_read = 0
     ORDER BY created_at DESC
     LIMIT 30
   `;
@@ -32,4 +32,20 @@ exports.markAllRead = (req, res) => {
     if (err) return res.status(500).json({ message: err.message });
     res.json({ message: "All notifications marked as read ✅" });
   });
+};
+
+exports.clearNotifications = async (req, res) => {
+  try {
+    const user_id = req.user.id;
+
+    await db.query(
+      "DELETE FROM notifications WHERE user_id = ?",
+      [user_id]
+    );
+
+    res.json({ message: "Notifications cleared" });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Failed to clear notifications" });
+  }
 };
