@@ -243,7 +243,9 @@ exports.changePassword = async (req, res) => {
       db.query(
         "UPDATE users SET password = ? WHERE id = ?",
         [hashedPassword, user_id]
-      );
+      , (err2) => {
+        if (err2) return res.status(500).json({ error: err2.message });
+      });
 
       createNotification(
         user_id,
@@ -252,7 +254,7 @@ exports.changePassword = async (req, res) => {
       );
 notifyAdmins(
   "Password Changed",
-  `${name} changed their password.`
+  `${req.user.name} changed their password.`
 );
       res.json({ message: "Password updated successfully ✅" });
     }
