@@ -17,7 +17,7 @@ const PORT = process.env.PORT || 3000;
 
 const allowedOrigins = [
   "http://localhost:5173",
-  "https://staffsync-afrg.onrender.com",
+  "https://staffsync-frontend.vercel.app"
 ];
 
 // Proper CORS configuration

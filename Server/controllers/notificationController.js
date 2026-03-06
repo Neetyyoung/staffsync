@@ -45,7 +45,7 @@ exports.clearNotifications = async (req, res) => {
 
     res.json({ message: "Notifications cleared" });
   } catch (error) {
-    console.error(error);
+    toast.error("Failed to clear notifications");
     res.status(500).json({ message: "Failed to clear notifications" });
   }
 };
