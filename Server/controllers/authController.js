@@ -229,34 +229,38 @@ exports.changePassword = async (req, res) => {
       const user = results[0];
 
       const isMatch = await bcrypt.compare(
-        currentPassword,
+        currentPassword.trim(),
         user.password
       );
 
-      if (!isMatch)
+      if (!isMatch) {
         return res
           .status(400)
           .json({ message: "Current password incorrect." });
+      }
 
       const hashedPassword = await bcrypt.hash(newPassword, 10);
 
       db.query(
         "UPDATE users SET password = ? WHERE id = ?",
-        [hashedPassword, user_id]
-      , (err2) => {
-        if (err2) return res.status(500).json({ error: err2.message });
-      });
+        [hashedPassword, user_id],
+        (err2) => {
+          if (err2) return res.status(500).json({ error: err2.message });
 
-      createNotification(
-        user_id,
-        "Password Changed",
-        "Your password was updated."
+          createNotification(
+            user_id,
+            "Password Changed",
+            "Your password was updated."
+          );
+
+          notifyAdmins(
+            "Password Changed",
+            `${req.user.name} changed their password.`
+          );
+
+          res.json({ message: "Password updated successfully ✅" });
+        }
       );
-notifyAdmins(
-  "Password Changed",
-  `${req.user.name} changed their password.`
-);
-      res.json({ message: "Password updated successfully ✅" });
     }
   );
 };
